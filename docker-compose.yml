@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+  mysql:
+    image: mysql:8
+    container_name: flashcard_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: fyp
+    volumes:
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    ports:
+      - "3306:3306"
+
+  backend:
+    build: ./server
+    container_name: flashcard_backend
+    ports:
+      - "5000:5000"
+    depends_on:
+      - mysql
+    environment:
+      DB_HOST: mysql
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_NAME: fyp
+
+  nlp:
+    build: ./nlp-service
+    container_name: flashcard_nlp
+    ports:
+      - "6000:6000"
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: flashcard_phpmyadmin
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_USER: root
+      PMA_PASSWORD: root
+    ports:
+      - "8080:80"
+    depends_on:
+      - mysql
