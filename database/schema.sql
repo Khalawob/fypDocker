@@ -35,7 +35,8 @@ CREATE INDEX idx_flashcard_set_user_id ON flashcard_set(user_id);
 CREATE TABLE IF NOT EXISTS flashcard (
   flashcard_id      INT AUTO_INCREMENT PRIMARY KEY,
   set_id            INT NOT NULL,
-  original_text     TEXT NOT NULL,
+  question          TEXT NOT NULL,
+  answer            TEXT NOT NULL,
 
   -- difficulty_rating: system-calculated score (you can still set an initial value)
   difficulty_rating DECIMAL(5,2) NOT NULL DEFAULT 0.00,
