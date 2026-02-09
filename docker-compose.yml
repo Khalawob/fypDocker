@@ -25,6 +25,7 @@ services:
       DB_PASSWORD: root
       DB_NAME: fyp
       JWT_SECRET: super_secret_change_me
+      NLP_URL: "http://nlp:6000"
 
   nlp:
     build: ./nlp-service
