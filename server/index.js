@@ -5,6 +5,7 @@ const authRoutes = require("./routes/authRoutes");
 const setRoutes = require("./routes/setRoutes");
 const flashcardRoutes = require("./routes/flashcardRoutes");
 const variationRoutes = require("./routes/variationRoutes");
+const sessionRoutes = require("./routes/sessionRoutes");
 
 
 const app = express();
@@ -18,6 +19,8 @@ app.use("/api", flashcardRoutes);
 app.use("/api/auth", authRoutes);
 
 app.use("/api", variationRoutes);
+
+app.use("/api", sessionRoutes);
 
 app.get("/", (req, res) => {
   res.send("Flashcard API running");

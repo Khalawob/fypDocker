@@ -38,18 +38,32 @@ router.post("/cards/:flashcardId/variations", requireAuth, async (req, res) => {
   try {
     // Ensure the flashcard belongs to a set owned by this user & get the answer text
     const rows = await query(
-      `SELECT f.flashcard_id, f.answer
-       FROM flashcard f
-       JOIN flashcard_set s ON s.set_id = f.set_id
-       WHERE f.flashcard_id = ? AND s.user_id = ?`,
-      [flashcardId, req.user.userId]
+      `SELECT 
+          f.flashcard_id, 
+          f.answer,
+          COALESCE(ufs.difficulty_rating, 0) AS user_difficulty_rating
+      FROM flashcard f
+      JOIN flashcard_set s ON s.set_id = f.set_id
+      LEFT JOIN user_flashcard_stats ufs
+        ON ufs.flashcard_id = f.flashcard_id AND ufs.user_id = ?
+      WHERE f.flashcard_id = ? AND s.user_id = ?`,
+      [req.user.userId, flashcardId, req.user.userId]
     );
+
 
     if (rows.length === 0) {
       return res.status(404).json({ message: "Flashcard not found" });
     }
 
     const answerText = rows[0].answer;
+
+    const ratingRaw = rows[0].user_difficulty_rating;
+    const rating = Math.max(0, Math.min(100, Number(ratingRaw ?? 0)));
+
+    let difficulty_level = 1;
+    if (rating > 75) difficulty_level = 4;
+    else if (rating > 50) difficulty_level = 3;
+    else if (rating > 25) difficulty_level = 2;
 
     if (!answerText || !String(answerText).trim()) {
       return res
@@ -65,16 +79,19 @@ router.post("/cards/:flashcardId/variations", requireAuth, async (req, res) => {
 
     let data;
     try {
-      const axRes = await axios.post(
-        `${nlpUrl}/generate`,
-        {
-          text: answerText,
-          variation_type,
-          blank_ratio,
-          seed,
-        },
-        { timeout: 8000 }
-      );
+      const payload = {
+        text: answerText,
+        variation_type,
+        blank_ratio,
+        seed,
+      };
+
+      // Auto-add difficulty_level when using DIFFICULTY_LEVEL_BLANKS
+      if (variation_type === "DIFFICULTY_LEVEL_BLANKS") {
+        payload.difficulty_level = difficulty_level;
+      }
+      const axRes = await axios.post(`${nlpUrl}/generate`, payload, { timeout: 8000 });
+
       data = axRes.data;
     } catch (e) {
       console.error("NLP call failed:", e.message);

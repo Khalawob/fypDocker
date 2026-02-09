@@ -159,3 +159,28 @@ CREATE TABLE IF NOT EXISTS hint (
 
 CREATE INDEX idx_hint_flashcard_id ON hint(flashcard_id);
 CREATE INDEX idx_hint_type ON hint(hint_type);
+
+
+CREATE TABLE IF NOT EXISTS user_flashcard_stats (
+  user_id           INT NOT NULL,
+  flashcard_id      INT NOT NULL,
+
+  difficulty_rating DECIMAL(5,2) NOT NULL DEFAULT 0.00,  -- 0..100 (per-user)
+  times_seen        INT NOT NULL DEFAULT 0,
+  correct_count     INT NOT NULL DEFAULT 0,
+  incorrect_count   INT NOT NULL DEFAULT 0,
+  avg_time_taken    DECIMAL(6,2) NOT NULL DEFAULT 0.00,  -- seconds
+  last_seen         DATETIME NULL,
+
+  PRIMARY KEY (user_id, flashcard_id),
+
+  CONSTRAINT fk_stats_user
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+    ON DELETE CASCADE,
+
+  CONSTRAINT fk_stats_flashcard
+    FOREIGN KEY (flashcard_id) REFERENCES flashcard(flashcard_id)
+    ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE INDEX idx_stats_flashcard ON user_flashcard_stats(flashcard_id);

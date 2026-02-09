@@ -26,7 +26,7 @@ def generate():
     text = data.get("text", "")
     variation_type = data.get("variation_type", "ALL_BLANK_FIRST_LETTERS")
 
-    # Used by RANDOM_BLANKS
+    # Used by RANDOM_BLANKS / RANDOM_FULL_BLANKS / INCREASING_DIFFICULTY
     blank_ratio = data.get("blank_ratio", None)
 
     # Used for reproducible randomness (optional)
@@ -53,14 +53,20 @@ def generate():
     candidates = [t for t in doc if eligible_token(t)]
     blank_set = set()
 
+    # Controls how blanks are rendered:
+    # True  -> first letter + underscores (m__________)
+    # False -> underscores only (__________)
+    blank_with_first_letter = True
+
     # ----------------------------
     # 1) ALL_BLANK_FIRST_LETTERS
     # ----------------------------
     if variation_type == "ALL_BLANK_FIRST_LETTERS":
         blank_set = set(candidates)
+        blank_with_first_letter = True
 
     # ----------------------------
-    # 2) RANDOM_BLANKS
+    # 2) RANDOM_BLANKS (first letter + underscores)
     # ----------------------------
     elif variation_type == "RANDOM_BLANKS":
         ratio = float(blank_ratio) if blank_ratio is not None else 0.40
@@ -71,6 +77,23 @@ def generate():
         else:
             k = max(1, int(len(candidates) * ratio))
             blank_set = set(random.sample(candidates, min(k, len(candidates))))
+
+        blank_with_first_letter = True
+
+    # ----------------------------
+    # NEW) RANDOM_FULL_BLANKS (underscores only, no first letter)
+    # ----------------------------
+    elif variation_type == "RANDOM_FULL_BLANKS":
+        ratio = float(blank_ratio) if blank_ratio is not None else 0.40
+        ratio = max(0.0, min(1.0, ratio))
+
+        if not candidates:
+            blank_set = set()
+        else:
+            k = max(1, int(len(candidates) * ratio))
+            blank_set = set(random.sample(candidates, min(k, len(candidates))))
+
+        blank_with_first_letter = False
 
     # ----------------------------
     # 3) KEY_TERMS_ONLY
@@ -86,6 +109,7 @@ def generate():
                 key_terms.append(t)
 
         blank_set = set(key_terms)
+        blank_with_first_letter = True
 
     # ----------------------------
     # 4) EVERY_OTHER_WORD
@@ -93,6 +117,7 @@ def generate():
     # ----------------------------
     elif variation_type == "EVERY_OTHER_WORD":
         blank_set = set(candidates[::2])
+        blank_with_first_letter = True
 
     # ----------------------------
     # 5) INCREASING_DIFFICULTY
@@ -115,8 +140,10 @@ def generate():
                 k = max(1, int(len(candidates) * ratio))
                 blank_set = set(random.sample(candidates, min(k, len(candidates))))
 
+        blank_with_first_letter = True
+
     # ----------------------------
-    # 6) DIFFICULTY_LEVEL_BLANKS (NEW)
+    # 6) DIFFICULTY_LEVEL_BLANKS
     # Level 1: 25%, Level 2: 50%, Level 3: 75%, Level 4: 100%
     # ----------------------------
     elif variation_type == "DIFFICULTY_LEVEL_BLANKS":
@@ -132,6 +159,15 @@ def generate():
                 k = max(1, int(len(candidates) * ratio))
                 blank_set = set(random.sample(candidates, min(k, len(candidates))))
 
+        blank_with_first_letter = True
+
+    # ALL_FULL_BLANKS
+    # Blank ALL eligible words, no first-letter clues
+    # ----------------------------
+    elif variation_type == "ALL_FULL_BLANKS":
+        blank_set = set(candidates)
+        blank_with_first_letter = False
+
     else:
         return jsonify({"error": f"Unknown variation_type: {variation_type}"}), 400
 
@@ -141,10 +177,15 @@ def generate():
 
     for t in doc:
         if t in blank_set:
-            first = t.text[0]
-            blanked = first + "_" * (len(t.text) - 1)
-            out_tokens.append(blanked)
-            clue_tokens.append(first)
+            if blank_with_first_letter:
+                first = t.text[0]
+                blanked = first + "_" * (len(t.text) - 1)
+                out_tokens.append(blanked)
+                clue_tokens.append(first)
+            else:
+                blanked = "_" * len(t.text)
+                out_tokens.append(blanked)
+                clue_tokens.append("")  # no first-letter clue
         else:
             out_tokens.append(t.text)
             clue_tokens.append(t.text)
@@ -164,4 +205,5 @@ def generate():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=6000)
+
 
