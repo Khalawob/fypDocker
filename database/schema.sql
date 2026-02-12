@@ -84,6 +84,9 @@ CREATE TABLE IF NOT EXISTS practice_session (
   started_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
   completed_at     DATETIME NULL,
   final_score      INT NOT NULL DEFAULT 0,
+  hard_phase VARCHAR(10) NOT NULL DEFAULT 'PREVIEW',
+  hard_preview_index INT NOT NULL DEFAULT 0,
+  hard_queue TEXT NULL,
 
   CONSTRAINT fk_session_user
     FOREIGN KEY (user_id) REFERENCES users(user_id)
@@ -108,6 +111,10 @@ CREATE TABLE IF NOT EXISTS practice_settings (
   randomize_order       BOOLEAN NOT NULL DEFAULT TRUE,
   use_adaptive_timing   BOOLEAN NOT NULL DEFAULT FALSE,
   reading_speed_modifier FLOAT NOT NULL DEFAULT 1.0,
+  prompt_type VARCHAR(50) NOT NULL DEFAULT 'NORMAL_HIDDEN',
+  blank_ratio FLOAT NULL,
+  seed INT NULL,
+
 
   CONSTRAINT fk_settings_session
     FOREIGN KEY (session_id) REFERENCES practice_session(session_id)
