@@ -18,6 +18,81 @@ function query(sql, params = []) {
   });
 }
 
+// Clamp helper to keep numbers in a safe range
+function clamp(n, min, max) { // Define clamp function
+  return Math.max(min, Math.min(max, n)); // Return clamped value
+}
+
+// Count words in a string (simple)
+function countWords(text) { // Define word counter
+  const s = String(text || "").trim(); // Convert to string and trim
+  if (!s) return 0; // If empty string, return 0
+  return s.split(/\s+/).filter(Boolean).length; // Split on whitespace and count
+}
+
+// Get user's calibrated words_per_second (fallback to default)
+async function getUserWordsPerSecond(userId) { // Define calibration fetch
+  const rows = await query( // Query DB
+    "SELECT words_per_second FROM user_calibration WHERE user_id = ?", // Select calibration
+    [userId] // Params
+  );
+
+  if (rows.length === 0) return 2.5; // Default reading speed if not calibrated
+  const wps = Number(rows[0].words_per_second); // Convert to number
+  if (!Number.isFinite(wps) || wps <= 0) return 2.5; // Safety fallback
+  return clamp(wps, 1.0, 6.0); // Clamp to sensible range
+}
+
+// Get per-user difficulty rating for a flashcard (fallback 50)
+async function getUserDifficultyRating(userId, flashcardId) { // Define difficulty fetch
+  const rows = await query( // Query DB
+    "SELECT difficulty_rating FROM user_flashcard_stats WHERE user_id = ? AND flashcard_id = ?", // Select rating
+    [userId, flashcardId] // Params
+  );
+
+  if (rows.length === 0) return 50; // Default difficulty if no stats
+  const rating = Number(rows[0].difficulty_rating); // Convert to number
+  if (!Number.isFinite(rating)) return 50; // Safety fallback
+  return clamp(rating, 0, 100); // Clamp 0..100
+}
+
+// Compute adaptive time (seconds) using reading speed + difficulty + modifier
+async function computeAdaptiveTimeSeconds({ // Define adaptive timing calculator
+  userId, // User id
+  flashcardId, // Flashcard id
+  textForTiming, // Text whose length determines timing
+  readingSpeedModifier, // User preference multiplier
+}) {
+  const wps = await getUserWordsPerSecond(userId); // Fetch words per second
+  const rating = await getUserDifficultyRating(userId, flashcardId); // Fetch difficulty rating
+
+  const wordCount = Math.max(1, countWords(textForTiming)); // Count words (min 1)
+
+  const baseSeconds = wordCount / wps; // Base time from reading speed
+
+  const difficultyMultiplier = 0.9 + (rating / 100) * 0.7; // 0.9 (easy) -> 1.6 (hard)
+
+  const modifier = Number(readingSpeedModifier || 1.0); // Convert modifier to number
+  const safeModifier = Number.isFinite(modifier) ? clamp(modifier, 0.5, 2.0) : 1.0; // Clamp modifier
+
+  const raw = baseSeconds * difficultyMultiplier * safeModifier; // Compute raw time
+
+  const seconds = clamp(raw, 3, 20); // Clamp final time to 3..20 seconds
+
+  return { // Return both final seconds and debug info
+    seconds: Number(seconds.toFixed(2)), // Rounded seconds
+    debug: { // Debug info object
+      word_count: wordCount, // Words in text
+      words_per_second: Number(wps.toFixed(2)), // Calibrated speed
+      difficulty_rating: rating, // Rating 0..100
+      difficulty_multiplier: Number(difficultyMultiplier.toFixed(2)), // Multiplier
+      reading_speed_modifier: Number(safeModifier.toFixed(2)), // Modifier
+      base_seconds: Number(baseSeconds.toFixed(2)), // Base time
+      raw_seconds: Number(raw.toFixed(2)), // Raw time before clamp
+      final_seconds: Number(seconds.toFixed(2)), // Final time
+    },
+  };
+}
 
 // Deterministic PRNG (seeded randomness)
 function mulberry32(seed) {
@@ -63,11 +138,14 @@ async function ensureSetOwnership(setId, userId) {
   return rows.length > 0; // True if owned
 }
 
-
 // Get session (and ensure it belongs to the user) + completion info
 async function getSession(sessionId, userId) {
   const rows = await query(
-    `SELECT session_id, set_id, difficulty_mode, time_per_card,
+    `SELECT session_id, set_id, difficulty_mode,
+            display_time_per_card, answer_time_limit,
+            card_order_json, easy_phase, easy_index,
+            moderate_phase, moderate_group_index, moderate_preview_index, 
+            moderate_test_index,
             hard_phase, hard_preview_index, hard_queue,
             completed_at, final_score
      FROM practice_session
@@ -181,7 +259,8 @@ router.post("/start", requireAuth, async (req, res) => {
     const {
       set_id, // Set to practice
       difficulty_mode = "EASY", // EASY/MODERATE/HARD
-      time_per_card = 5, // Timer (frontend uses this)
+      display_time_per_card = null, // reading time (how long card is shown before answering)
+      answer_time_limit = null, // answering time limit (default 2 minutes)
       group_size = 5, // MODERATE grouping size
       randomize_order = true, // Shuffle option
       use_adaptive_timing = false, // Future feature
@@ -198,17 +277,82 @@ router.post("/start", requireAuth, async (req, res) => {
     const ok = await ensureSetOwnership(set_id, req.user.userId); // Check set ownership
     if (!ok) return res.status(404).json({ message: "Set not found" }); // If not owned, 404
 
+    // Decide display (reading) time default based on mode
+    let displayTime = Number(display_time_per_card); // Use new field if provided
+
+    if (!Number.isFinite(displayTime) || displayTime <= 0) { // If not provided
+      if (String(difficulty_mode) === "EASY") displayTime = 5;
+      else if (String(difficulty_mode) === "MODERATE") displayTime = 10;
+      else if (String(difficulty_mode) === "HARD") displayTime = 10;
+      else displayTime = 10;
+    }
+
+    // Decide answer time limit default (2 minutes)
+    let answerLimit = Number(answer_time_limit); // Parse answer limit
+    if (!Number.isFinite(answerLimit) || answerLimit <= 0) answerLimit = 120; // Default 120 seconds
 
     const sessionInsert = await query(
-      `INSERT INTO practice_session (user_id, set_id, difficulty_mode, time_per_card)
-       VALUES (?, ?, ?, ?)`, // Insert session row
-      [req.user.userId, set_id, difficulty_mode, time_per_card] // Values
+      `INSERT INTO practice_session (user_id, set_id, difficulty_mode, display_time_per_card, answer_time_limit)
+       VALUES (?, ?, ?, ?, ?)`, // Insert session row
+      [req.user.userId, set_id, difficulty_mode, displayTime, answerLimit] // Values
     );
 
 
     const session_id = sessionInsert.insertId; // Grab new session ID
+    
+    // Build and store a stable card order for this session + initialize phases
+    const cardIdRows = await query(
+      `SELECT flashcard_id
+      FROM flashcard
+      WHERE set_id = ?
+      ORDER BY flashcard_id ASC`,
+      [set_id]
+    );
+
+    const ids = cardIdRows.map(r => Number(r.flashcard_id)).filter(Boolean);
+
+    // 
+    const sessionSeed = seed !== null && seed !== undefined ? Number(seed) : session_id;
+    const orderedIds = randomize_order ? seededShuffle(ids, sessionSeed) : ids;
+
+    const updates = [];
+    const params = [];
+
+    // Always store card order for ALL modes (useful for consistency)
+    updates.push("card_order_json = ?");
+    params.push(JSON.stringify(orderedIds));
+
+    // Initialize only the chosen mode
+    if (String(difficulty_mode) === "EASY") {
+      updates.push("easy_phase = 'REVEAL'");
+      updates.push("easy_index = 0");
+    }
+
+    if (String(difficulty_mode) === "MODERATE") {
+      updates.push("moderate_phase = 'PREVIEW'");
+      updates.push("moderate_group_index = 0");
+      updates.push("moderate_preview_index = 0");
+      updates.push("moderate_test_index = 0");
+    }
+
+    if (String(difficulty_mode) === "HARD") {
+      updates.push("hard_phase = 'PREVIEW'");
+      updates.push("hard_preview_index = 0");
+      updates.push("hard_queue = NULL");
+    }
+
+    // finalize update
+    params.push(session_id);
+
+    await query(
+      `UPDATE practice_session
+      SET ${updates.join(", ")}
+      WHERE session_id = ?`,
+      params
+    );
 
 
+    
     await query(
       `INSERT INTO practice_settings
        (session_id, group_size, randomize_order, use_adaptive_timing, reading_speed_modifier, prompt_type, blank_ratio, seed)
@@ -244,7 +388,6 @@ router.post("/start", requireAuth, async (req, res) => {
 router.get("/:sessionId/next", requireAuth, async (req, res) => {
   const sessionId = Number(req.params.sessionId); // Parse sessionId from URL
 
-
   try {
     const session = await getSession(sessionId, req.user.userId); // Load session (and ownership)
     if (!session) return res.status(404).json({ message: "Session not found" }); // Not found/owned
@@ -254,9 +397,9 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
       "SELECT * FROM practice_settings WHERE session_id = ?", // Load practice settings
       [sessionId] // Param
     );
-    if (settingsRows.length === 0) return res.status(500).json({ message: "Missing practice settings" }); // Must exist
-
-
+    if (settingsRows.length === 0) {
+      return res.status(500).json({ message: "Missing practice settings" }); // Must exist
+    }
     const settings = settingsRows[0]; // Single settings row
 
 
@@ -276,6 +419,7 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
     const groupSize = Math.max(1, Number(settings.group_size) || 5); // Determine group size
     const promptType = String(settings.prompt_type || "NORMAL_HIDDEN"); // Determine prompt type
     const nlpUrl = (process.env.NLP_URL || "http://127.0.0.1:6000").trim(); // NLP base URL
+    
 
 
     // ---------------- HARD MODE ----------------
@@ -319,11 +463,29 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
           [sessionId] // Param
         );
 
+        let displayTimeToSend = Number(session.display_time_per_card || 10); // Reading time
+        let timingDebug = null; // Optional debug info
+        const answerTimeLimit = Number(session.answer_time_limit || 120); // Answering time limit
+
+        if (settings.use_adaptive_timing) {
+          const timing = await computeAdaptiveTimeSeconds({
+            userId: req.user.userId,
+            flashcardId: card.flashcard_id,
+            textForTiming: card.answer,
+            readingSpeedModifier: settings.reading_speed_modifier,
+          });
+
+          displayTimeToSend = timing.seconds;
+          timingDebug = timing.debug;
+        }
+
+
 
         return res.json({
           difficulty_mode: "HARD", // Mode
           phase: "PREVIEW", // Phase
-          time_per_card: session.time_per_card, // Timer for frontend (e.g. 10s)
+          display_time_per_card: displayTimeToSend, // display card tome
+          answer_time_limit: answerTimeLimit,       // answer card time
           progress: { index: idx + 1, total: cards.length }, // Preview progress
           flashcard_id: card.flashcard_id, // Card id
           question: card.question, // Question
@@ -389,10 +551,31 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
 
       // NORMAL_HIDDEN in TEST: show question only
       if (promptType === "NORMAL_HIDDEN") {
+        let displayTimeToSend = Number(session.display_time_per_card || 10); // Reading time
+        let timingDebug = null; // Optional debug
+        const answerTimeLimit = Number(session.answer_time_limit || 120); // Answer time limit
+
+
+        if (settings.use_adaptive_timing) {
+          const timing = await computeAdaptiveTimeSeconds({
+            userId: req.user.userId,
+            flashcardId: card.flashcard_id,
+            textForTiming: card.question,
+            readingSpeedModifier: settings.reading_speed_modifier,
+          });
+
+          displayTimeToSend = timing.seconds;
+          timingDebug = timing.debug;
+        }
+
+        
         return res.json({
           difficulty_mode: "HARD", // Mode
           phase: "TEST", // Phase
-          time_per_card: session.time_per_card, // Timer
+          display_time_per_card: displayTimeToSend,
+          answer_time_limit: answerTimeLimit,
+          adaptive_time: !!settings.use_adaptive_timing,
+          timing_debug: timingDebug,
           progress: { remaining: remaining.length, total: cards.length }, // Remaining count
           flashcard_id: card.flashcard_id, // Card id
           question: card.question, // Question
@@ -445,11 +628,32 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
 
       const axRes = await axios.post(`${nlpUrl}/generate`, payload); // Call NLP service
 
+      let displayTimeToSend = Number(session.display_time_per_card || 10); // Reading time
+      let timingDebug = null; // Optional debug
+      const answerTimeLimit = Number(session.answer_time_limit || 120); // Answer time limit
+
+
+      if (settings.use_adaptive_timing) {
+        const timing = await computeAdaptiveTimeSeconds({
+          userId: req.user.userId,
+          flashcardId: card.flashcard_id,
+          textForTiming: axRes.data.blanked_text || card.answer,
+          readingSpeedModifier: settings.reading_speed_modifier,
+        });
+
+        displayTimeToSend = timing.seconds;
+        timingDebug = timing.debug;
+      }
+
+
 
       return res.json({
         difficulty_mode: "HARD", // Mode
         phase: "TEST", // Phase
-        time_per_card: session.time_per_card, // Timer
+        display_time_per_card: displayTimeToSend, // Reading time (adaptive affects this)
+        answer_time_limit: answerTimeLimit, // Answer time limit
+        adaptive_time: !!settings.use_adaptive_timing,
+        timing_debug: timingDebug,
         progress: { remaining: remaining.length, total: cards.length }, // Remaining count
         flashcard_id: card.flashcard_id, // Card id
         question: card.question, // Question
@@ -463,147 +667,222 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
     //EASY / MODERATE
 
 
-    const progressRows = await query(
-      "SELECT COUNT(*) AS answered_count FROM performance_result WHERE session_id = ?", // Count submitted answers
-      [sessionId] // Param
-    );
+    // Build stable order from DB
+    const orderedIds = safeJsonParse(session.card_order_json || "[]", []);
+    if (orderedIds.length === 0) {
+      return res.status(500).json({ message: "Missing card_order_json for session" });
+    }
 
+// Map for quick lookup
+const cardById = new Map(cards.map(c => [Number(c.flashcard_id), c]));
 
-    const answeredCount = Number(progressRows[0]?.answered_count || 0); // Cursor position
+// Helper: complete when truly finished (based on phase indices)
+async function completeIfNeeded() {
+  // If already completed, avoid re-completing
+  if (session.completed_at) {
+    return res.json({
+      done: true,
+      difficulty_mode: session.difficulty_mode,
+      message: "Session already completed.",
+      final_score: session.final_score,
+    });
+  }
 
+  const completion = await completeSessionForUser(sessionId, req.user.userId);
+  const summary = await buildCompactSummary(
+    completion,
+    session.difficulty_mode,
+    cards.length,
+    session.set_id
+  );
 
-    // AUTO-COMPLETE EASY/MODERATE when answeredCount >= total
-    if (answeredCount >= cards.length) {
-      // If already completed, just return done (avoid double-complete)
-      if (session.completed_at) {
-        return res.json({
-          done: true, // Done
-          difficulty_mode: session.difficulty_mode, // Mode
-          message: "Session already completed.", // Message
-          final_score: session.final_score, // Score if stored
-        });
-      }
+  return res.json({
+    done: true,
+    difficulty_mode: session.difficulty_mode,
+    message: "Session finished. Auto-completed.",
+    summary,
+    completion,
+  });
+}
 
+// ---------- EASY ----------
+if (String(session.difficulty_mode) === "EASY") {
+  const idx = Number(session.easy_index || 0);
+  if (idx >= orderedIds.length) return completeIfNeeded();
 
-      // Complete the session and update per-user difficulty stats
-      const completion = await completeSessionForUser(sessionId, req.user.userId); // Completion engine
+  const phase = String(session.easy_phase || "REVEAL");
+  const cardId = orderedIds[idx];
+  const card = cardById.get(Number(cardId));
+  if (!card) return res.status(500).json({ message: "Invalid card in card_order_json" });
 
+  const answerTimeLimit = Number(session.answer_time_limit || 120);
 
-      const summary = await buildCompactSummary(
-        completion,
-        session.difficulty_mode,
-        cards.length,
-        session.set_id
+  // If we're in ANSWER phase, block /next until user submits /answer
+  if (phase === "ANSWER") {
+    return res.status(400).json({
+      message: "Submit an answer before requesting the next card.",
+      difficulty_mode: "EASY",
+      phase: "ANSWER",
+      flashcard_id: card.flashcard_id,
+      question: card.question,
+      answer_time_limit: answerTimeLimit,
+    });
+  }
+
+  // Otherwise phase === REVEAL
+  let revealSeconds = 15;
+  let timingDebug = null;
+
+  if (settings.use_adaptive_timing) {
+    const timing = await computeAdaptiveTimeSeconds({
+      userId: req.user.userId,
+      flashcardId: card.flashcard_id,
+      textForTiming: card.answer, // calibration affects ANSWER reveal time
+      readingSpeedModifier: settings.reading_speed_modifier,
+    });
+    revealSeconds = timing.seconds;
+    timingDebug = timing.debug;
+  }
+
+  await query(
+    `UPDATE practice_session
+     SET easy_phase = 'ANSWER'
+     WHERE session_id = ?`,
+    [sessionId]
+  );
+
+  return res.json({
+    difficulty_mode: "EASY",
+    phase: "REVEAL",
+    reveal_seconds: revealSeconds,
+    timing_debug: timingDebug,
+    flashcard_id: card.flashcard_id,
+    question: card.question,
+    answer: card.answer,
+    answer_time_limit: answerTimeLimit,
+  });
+}
+
+// ---------- MODERATE ----------
+if (String(session.difficulty_mode) === "MODERATE") {
+  const gs = Math.max(1, Number(settings.group_size) || 5);
+  const groupIndex = Number(session.moderate_group_index || 0);
+  const groupStart = groupIndex * gs;
+  const groupEnd = Math.min(groupStart + gs, orderedIds.length);
+
+  if (groupStart >= orderedIds.length) return completeIfNeeded();
+
+  const phase = String(session.moderate_phase || "PREVIEW");
+
+  // PREVIEW: show Q+A for each card in group, then switch to TEST
+  if (phase === "PREVIEW") {
+    const previewIndex = Number(session.moderate_preview_index || 0);
+    const absoluteIndex = groupStart + previewIndex;
+
+    // Finished preview -> switch to TEST
+    if (absoluteIndex >= groupEnd) {
+      await query(
+        `UPDATE practice_session
+         SET moderate_phase = 'TEST',
+             moderate_test_index = 0
+         WHERE session_id = ?`,
+        [sessionId]
       );
 
-
       return res.json({
-        done: true, // Done
-        difficulty_mode: session.difficulty_mode, // Mode
-        message: "Session finished. Auto-completed.", // Message
-        summary, // Compact summary for frontend end screen
-        completion, // Completion payload
+        difficulty_mode: "MODERATE",
+        phase: "TEST",
+        message: "Group preview finished. Start answering this group.",
+        call_next_again: true,
       });
     }
 
+    const cardId = orderedIds[absoluteIndex];
+    const card = cardById.get(Number(cardId));
+    if (!card) return res.status(500).json({ message: "Invalid card in card_order_json" });
 
-    let ordered; // Will hold ordered list of cards
+    // Advance preview cursor
+    await query(
+      `UPDATE practice_session
+       SET moderate_preview_index = moderate_preview_index + 1
+       WHERE session_id = ?`,
+      [sessionId]
+    );
 
+    // Decide answer reveal seconds (calibration affects answer reveal)
+    let revealSeconds = 15;
+    let timingDebug = null;
 
-    // MODERATE: grouped ordering
-    if (String(session.difficulty_mode) === "MODERATE") {
-      ordered = orderCardsModerate(cards, settings.group_size, seed, settings.randomize_order); // Group ordering
-    } else {
-      // EASY (and default): shuffle whole set if enabled
-      ordered = settings.randomize_order ? seededShuffle(cards, seed) : cards; // Full shuffle ordering
+    if (settings.use_adaptive_timing) {
+      const timing = await computeAdaptiveTimeSeconds({
+        userId: req.user.userId,
+        flashcardId: card.flashcard_id,
+        textForTiming: card.answer,
+        readingSpeedModifier: settings.reading_speed_modifier,
+      });
+      revealSeconds = timing.seconds;
+      timingDebug = timing.debug;
     }
-
-
-    const currentCard = ordered[answeredCount]; // Select next card using answeredCount
-
-
-    const groupIndex = Math.floor(answeredCount / groupSize); // Compute group number
-    const indexInGroup = answeredCount % groupSize; // Compute position in group
-
-
-    const basePayload = {
-      flashcard_id: currentCard.flashcard_id, // Card id
-      question: currentCard.question, // Question
-      prompt_type: promptType, // Prompt type
-      difficulty_mode: session.difficulty_mode, // Mode
-      time_per_card: session.time_per_card, // Timer
-      group: {
-        group_index: groupIndex + 1, // Human-friendly group number
-        group_size: groupSize, // Group size
-        index_in_group: indexInGroup + 1, // Human-friendly position
-      },
-      progress: {
-        answered: answeredCount, // Answered so far
-        total: cards.length, // Total cards
-      },
-    };
-
-
-    // NORMAL flashcard: frontend hides answer
-    if (promptType === "NORMAL_HIDDEN") return res.json(basePayload); // Return base payload only
-
-
-    // NLP flashcard prompt: build payload
-    const payload = {
-      text: currentCard.answer, // Use correct answer as source text for blanking
-      variation_type: promptType, // Variation type
-    };
-
-
-    // Add randomness controls for random-based variations
-    if (promptType === "RANDOM_BLANKS" || promptType === "RANDOM_FULL_BLANKS" || promptType === "INCREASING_DIFFICULTY") {
-      if (settings.blank_ratio !== null && settings.blank_ratio !== undefined) payload.blank_ratio = Number(settings.blank_ratio); // Ratio
-      payload.seed = seed + answeredCount; // Seed per step
-    }
-
-
-    // Increasing difficulty uses attempt_number
-    if (promptType === "INCREASING_DIFFICULTY") {
-      const attemptRows = await query(
-        "SELECT COUNT(*) AS c FROM performance_result WHERE session_id = ? AND flashcard_id = ?", // Count attempts
-        [sessionId, currentCard.flashcard_id] // Params
-      );
-      payload.attempt_number = Number(attemptRows[0]?.c || 0) + 1; // Next attempt number
-    }
-
-
-    // Difficulty-level blanks uses per-user stats
-    if (promptType === "DIFFICULTY_LEVEL_BLANKS") {
-      const stats = await query(
-        "SELECT COALESCE(difficulty_rating, 0) AS difficulty_rating FROM user_flashcard_stats WHERE user_id = ? AND flashcard_id = ?", // Rating query
-        [req.user.userId, currentCard.flashcard_id] // Params
-      );
-
-
-      const rating = Math.max(0, Math.min(100, Number(stats[0]?.difficulty_rating ?? 0))); // Clamp 0..100
-
-
-      let difficulty_level = 1; // Default
-      if (rating > 75) difficulty_level = 4; // Level 4
-      else if (rating > 50) difficulty_level = 3; // Level 3
-      else if (rating > 25) difficulty_level = 2; // Level 2
-
-
-      payload.difficulty_level = difficulty_level; // Add to payload
-    }
-
-
-    const axRes = await axios.post(`${nlpUrl}/generate`, payload); // Call NLP generator
-
 
     return res.json({
-      ...basePayload, // Include base fields
-      blanked_text: axRes.data.blanked_text, // Include blanked prompt
-      first_letter_clues: axRes.data.first_letter_clues, // Include clues
+      difficulty_mode: "MODERATE",
+      phase: "PREVIEW",
+      reveal_seconds: revealSeconds,
+      timing_debug: timingDebug,
+      group: { index: groupIndex + 1, size: gs },
+      progress: { in_group: previewIndex + 1, group_total: groupEnd - groupStart },
+      flashcard_id: card.flashcard_id,
+      question: card.question,
+      answer: card.answer,
     });
-  } catch (err) {
-    console.error("Next card error:", err); // Log error
-    res.status(500).json({ message: "Server error" }); // Generic 500
+  }
+
+  // TEST: show question only; must answer all in group before next group
+  const testIndex = Number(session.moderate_test_index || 0);
+  const absoluteIndex = groupStart + testIndex;
+
+  // Finished test -> next group preview
+  if (absoluteIndex >= groupEnd) {
+    await query(
+      `UPDATE practice_session
+       SET moderate_group_index = moderate_group_index + 1,
+           moderate_phase = 'PREVIEW',
+           moderate_preview_index = 0,
+           moderate_test_index = 0
+       WHERE session_id = ?`,
+      [sessionId]
+    );
+
+    return res.json({
+      difficulty_mode: "MODERATE",
+      phase: "PREVIEW",
+      message: "Group completed. Moving to next group preview.",
+      call_next_again: true,
+    });
+  }
+
+  const cardId = orderedIds[absoluteIndex];
+  const card = cardById.get(Number(cardId));
+  if (!card) return res.status(500).json({ message: "Invalid card in card_order_json" });
+
+  
+  return res.json({
+    difficulty_mode: "MODERATE",
+    phase: "TEST",
+    group: { index: groupIndex + 1, size: gs },
+    progress: { answered_in_group: testIndex + 1, group_total: groupEnd - groupStart },
+    flashcard_id: card.flashcard_id,
+    question: card.question,
+    answer_time_limit: Number(session.answer_time_limit || 120),
+  });
+}
+
+// Fallback
+return res.status(400).json({ message: "Unsupported difficulty_mode" });
+
+} catch (err) {
+    console.error("Next card error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
@@ -614,15 +893,32 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
 router.post("/:sessionId/answer", requireAuth, async (req, res) => {
   const sessionId = Number(req.params.sessionId); // Parse sessionId
 
-
   try {
     const session = await getSession(sessionId, req.user.userId); // Load session
     if (!session) return res.status(404).json({ message: "Session not found" }); // Not found/owned
 
+    const settingsRows = await query(
+      "SELECT * FROM practice_settings WHERE session_id = ?",
+      [sessionId]
+    );
+    if (settingsRows.length === 0) {
+      return res.status(500).json({ message: "Missing practice settings" });
+    }
+    const settings = settingsRows[0];
 
-    // Block answering during HARD preview phase
-    if (session.difficulty_mode === "HARD" && session.hard_phase === "PREVIEW") {
-      return res.status(400).json({ message: "Cannot submit answers during HARD preview phase" }); // Reject
+
+    // Block answering during phases that are not answer phases
+    if (String(session.difficulty_mode) === "HARD" && String(session.hard_phase) === "PREVIEW") {
+      return res.status(400).json({ message: "Cannot submit answers during HARD preview phase" });
+    }
+
+    if (String(session.difficulty_mode) === "EASY" && String(session.easy_phase || "REVEAL") !== "ANSWER") {
+      return res.status(400).json({ message: "Not in answer phase yet" });
+    }
+
+
+    if (String(session.difficulty_mode) === "MODERATE" && String(session.moderate_phase || "PREVIEW") === "PREVIEW") {
+      return res.status(400).json({ message: "Cannot submit answers during MODERATE preview phase" });
     }
 
 
@@ -631,6 +927,61 @@ router.post("/:sessionId/answer", requireAuth, async (req, res) => {
 
     if (!flashcard_id || user_answer === undefined) {
       return res.status(400).json({ message: "flashcard_id and user_answer are required" }); // Validate
+    }
+
+    // Enforce answering the current card (MODERATE)
+    if (String(session.difficulty_mode) === "MODERATE") {
+      // Only allow answering in TEST phase
+      if (String(session.moderate_phase || "PREVIEW") !== "TEST") {
+        return res.status(400).json({ message: "Cannot submit answers during MODERATE preview phase" });
+      }
+
+      const orderedIds = safeJsonParse(session.card_order_json || "[]", []);
+      const gs = Math.max(1, Number(settings.group_size) || 5);
+
+      const groupIndex = Number(session.moderate_group_index || 0);
+      const testIndex = Number(session.moderate_test_index || 0);
+
+      const groupStart = groupIndex * gs;
+      const absoluteIndex = groupStart + testIndex;
+
+      // Safety: if we're past the end, group/session is effectively done
+      if (absoluteIndex >= orderedIds.length) {
+        return res.status(400).json({ message: "No current card to answer (session/group finished)." });
+      }
+
+      const expectedId = Number(orderedIds[absoluteIndex]);
+
+      if (Number(flashcard_id) !== expectedId) {
+        return res.status(400).json({
+          message: "You must answer the current card.",
+          expected_flashcard_id: expectedId,
+          phase: "TEST",
+          difficulty_mode: "MODERATE",
+          group: { index: groupIndex + 1, size: gs },
+          progress: { answered_in_group: testIndex, group_total: Math.min(gs, orderedIds.length - groupStart) }
+        });
+      }
+    }
+
+
+    // Enforce answering the current card (EASY)
+    if (String(session.difficulty_mode) === "EASY") {
+      const orderedIds = safeJsonParse(session.card_order_json || "[]", []);
+      const idx = Number(session.easy_index || 0);
+
+      if (idx >= orderedIds.length) {
+        return res.status(400).json({ message: "Session already finished (no current card)." });
+      }
+      
+      const expectedId = Number(orderedIds[idx]);
+
+      if (Number(flashcard_id) !== expectedId) {
+        return res.status(400).json({
+          message: "You must answer the current card.",
+          expected_flashcard_id: expectedId,
+        });
+      }
     }
 
 
@@ -671,6 +1022,27 @@ router.post("/:sessionId/answer", requireAuth, async (req, res) => {
         attempt_number, // Attempt number
       ]
     );
+
+    // Advance phase/index for EASY and MODERATE after an answer is submitted
+    if (String(session.difficulty_mode) === "EASY") {
+      await query(
+        `UPDATE practice_session
+        SET easy_index = easy_index + 1,
+            easy_phase = 'REVEAL'
+        WHERE session_id = ?`,
+        [sessionId]
+      );
+    }
+
+    if (String(session.difficulty_mode) === "MODERATE") {
+      await query(
+        `UPDATE practice_session
+        SET moderate_test_index = moderate_test_index + 1
+        WHERE session_id = ?`,
+        [sessionId]
+      );
+    }
+
 
 
     res.json({

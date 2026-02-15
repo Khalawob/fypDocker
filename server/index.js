@@ -9,6 +9,8 @@ const flashcardRoutes = require("./routes/flashcardRoutes"); // Flashcard routes
 const variationRoutes = require("./routes/variationRoutes"); // NLP variation routes
 const sessionRoutes = require("./routes/sessionRoutes");     // Session routes (router + completion)
 const practiceRoutes = require("./routes/practiceRoutes");   // Practice engine routes
+const calibrationRoutes = require("./routes/calibrationRoutes"); // Calibration routes 
+
 
 const app = express();  // Create Express app
 
@@ -34,6 +36,9 @@ app.use("/api", sessionRoutes);
 
 // Practice routes
 app.use("/api/practice", practiceRoutes);
+
+// Calibration route for testing reading speed and timing
+app.use("/api", calibrationRoutes);
 
 // End points for tests
 

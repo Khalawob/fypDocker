@@ -80,13 +80,23 @@ CREATE TABLE IF NOT EXISTS practice_session (
   user_id          INT NOT NULL,
   set_id           INT NOT NULL,
   difficulty_mode  VARCHAR(20) NOT NULL,     -- 'EASY', 'MODERATE', 'HARD'
-  time_per_card    INT,                      -- seconds (nullable if adaptive)
+  display_time_per_card INT NOT NULL DEFAULT 10,
+  answer_time_limit INT NOT NULL DEFAULT 120, -- seconds before marking as incorrect
   started_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
   completed_at     DATETIME NULL,
   final_score      INT NOT NULL DEFAULT 0,
   hard_phase VARCHAR(10) NOT NULL DEFAULT 'PREVIEW',
   hard_preview_index INT NOT NULL DEFAULT 0,
   hard_queue TEXT NULL,
+  card_order_json LONGTEXT NULL,
+
+  easy_phase VARCHAR(10) NULL DEFAULT 'REVEAL',
+  easy_index INT NOT NULL DEFAULT 0,
+
+  moderate_phase VARCHAR(12) NULL DEFAULT 'PREVIEW',
+  moderate_group_index INT NOT NULL DEFAULT 0,
+  moderate_preview_index INT NOT NULL DEFAULT 0,
+  moderate_test_index INT NOT NULL DEFAULT 0,
 
   CONSTRAINT fk_session_user
     FOREIGN KEY (user_id) REFERENCES users(user_id)
@@ -191,3 +201,14 @@ CREATE TABLE IF NOT EXISTS user_flashcard_stats (
 ) ENGINE=InnoDB;
 
 CREATE INDEX idx_stats_flashcard ON user_flashcard_stats(flashcard_id);
+
+
+CREATE TABLE IF NOT EXISTS user_calibration (
+  user_id INT PRIMARY KEY,
+  words_per_second FLOAT NOT NULL DEFAULT 2.5,
+  calibrated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_calib_user
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+    ON DELETE CASCADE
+) ENGINE=InnoDB;
+
