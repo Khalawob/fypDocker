@@ -324,7 +324,7 @@ router.post("/start", requireAuth, async (req, res) => {
 
     // Initialize only the chosen mode
     if (String(difficulty_mode) === "EASY") {
-      updates.push("easy_phase = 'REVEAL'");
+      updates.push("easy_phase = 'PREVIEW'");
       updates.push("easy_index = 0");
     }
 
@@ -705,63 +705,127 @@ async function completeIfNeeded() {
   });
 }
 
-// ---------- EASY ----------
+// ---------- EASY (2-phase: PREVIEW -> TEST) ----------
 if (String(session.difficulty_mode) === "EASY") {
   const idx = Number(session.easy_index || 0);
   if (idx >= orderedIds.length) return completeIfNeeded();
 
-  const phase = String(session.easy_phase || "REVEAL");
+  const phase = String(session.easy_phase || "PREVIEW"); // default PREVIEW
   const cardId = orderedIds[idx];
   const card = cardById.get(Number(cardId));
   if (!card) return res.status(500).json({ message: "Invalid card in card_order_json" });
 
   const answerTimeLimit = Number(session.answer_time_limit || 120);
 
-  // If we're in ANSWER phase, block /next until user submits /answer
-  if (phase === "ANSWER") {
-    return res.status(400).json({
-      message: "Submit an answer before requesting the next card.",
+  // -------- PREVIEW: show full answer, then flip to TEST --------
+  if (phase === "PREVIEW") {
+    let revealSeconds = 15;
+    let timingDebug = null;
+
+    if (settings.use_adaptive_timing) {
+      const timing = await computeAdaptiveTimeSeconds({
+        userId: req.user.userId,
+        flashcardId: card.flashcard_id,
+        textForTiming: card.answer,
+        readingSpeedModifier: settings.reading_speed_modifier,
+      });
+      revealSeconds = timing.seconds;
+      timingDebug = timing.debug;
+    }
+
+    await query(
+      `UPDATE practice_session
+       SET easy_phase = 'TEST'
+       WHERE session_id = ?`,
+      [sessionId]
+    );
+
+    return res.json({
       difficulty_mode: "EASY",
-      phase: "ANSWER",
+      phase: "PREVIEW",
+      reveal_seconds: revealSeconds,
+      timing_debug: timingDebug,
+      progress: { current: idx + 1, total: orderedIds.length },
+      flashcard_id: card.flashcard_id,
+      question: card.question,
+      answer: card.answer, // full answer in preview
+    });
+  }
+
+  // -------- TEST: question only, optionally blanks --------
+  if (phase === "TEST") {
+    // NORMAL
+    if (promptType === "NORMAL_HIDDEN") {
+      return res.json({
+        difficulty_mode: "EASY",
+        phase: "TEST",
+        progress: { current: idx + 1, total: orderedIds.length },
+        flashcard_id: card.flashcard_id,
+        question: card.question,
+        answer_time_limit: answerTimeLimit,
+        prompt_type: "NORMAL_HIDDEN",
+      });
+    }
+
+    // BLANKS (generate from answer, like MODERATE TEST / HARD TEST)
+    const payload = { text: card.answer, variation_type: promptType };
+
+    if (
+      promptType === "RANDOM_BLANKS" ||
+      promptType === "RANDOM_FULL_BLANKS" ||
+      promptType === "INCREASING_DIFFICULTY"
+    ) {
+      if (settings.blank_ratio !== null && settings.blank_ratio !== undefined) {
+        payload.blank_ratio = Number(settings.blank_ratio);
+      }
+      payload.seed = seed + idx; // stable per card
+    }
+
+    if (promptType === "INCREASING_DIFFICULTY") {
+      const attemptRows = await query(
+        "SELECT COUNT(*) AS c FROM performance_result WHERE session_id = ? AND flashcard_id = ?",
+        [sessionId, card.flashcard_id]
+      );
+      payload.attempt_number = Number(attemptRows[0]?.c || 0) + 1;
+    }
+
+    if (promptType === "DIFFICULTY_LEVEL_BLANKS") {
+      const stats = await query(
+        "SELECT COALESCE(difficulty_rating, 0) AS difficulty_rating FROM user_flashcard_stats WHERE user_id = ? AND flashcard_id = ?",
+        [req.user.userId, card.flashcard_id]
+      );
+
+      const rating = Math.max(0, Math.min(100, Number(stats[0]?.difficulty_rating ?? 0)));
+
+      let difficulty_level = 1;
+      if (rating > 75) difficulty_level = 4;
+      else if (rating > 50) difficulty_level = 3;
+      else if (rating > 25) difficulty_level = 2;
+
+      payload.difficulty_level = difficulty_level;
+    }
+
+    const axRes = await axios.post(`${nlpUrl}/generate`, payload);
+
+    return res.json({
+      difficulty_mode: "EASY",
+      phase: "TEST",
+      progress: { current: idx + 1, total: orderedIds.length },
       flashcard_id: card.flashcard_id,
       question: card.question,
       answer_time_limit: answerTimeLimit,
+      prompt_type: promptType,
+      blanked_text: axRes.data.blanked_text,
+      first_letter_clues: axRes.data.first_letter_clues,
     });
   }
 
-  // Otherwise phase === REVEAL
-  let revealSeconds = 15;
-  let timingDebug = null;
-
-  if (settings.use_adaptive_timing) {
-    const timing = await computeAdaptiveTimeSeconds({
-      userId: req.user.userId,
-      flashcardId: card.flashcard_id,
-      textForTiming: card.answer, // calibration affects ANSWER reveal time
-      readingSpeedModifier: settings.reading_speed_modifier,
-    });
-    revealSeconds = timing.seconds;
-    timingDebug = timing.debug;
-  }
-
-  await query(
-    `UPDATE practice_session
-     SET easy_phase = 'ANSWER'
-     WHERE session_id = ?`,
-    [sessionId]
-  );
-
-  return res.json({
-    difficulty_mode: "EASY",
-    phase: "REVEAL",
-    reveal_seconds: revealSeconds,
-    timing_debug: timingDebug,
-    flashcard_id: card.flashcard_id,
-    question: card.question,
-    answer: card.answer,
-    answer_time_limit: answerTimeLimit,
-  });
+  // If phase somehow invalid
+  return res.status(500).json({ message: "Invalid easy_phase state" });
 }
+
+
+
 
 // ---------- MODERATE ----------
 if (String(session.difficulty_mode) === "MODERATE") {
@@ -866,6 +930,62 @@ if (String(session.difficulty_mode) === "MODERATE") {
   if (!card) return res.status(500).json({ message: "Invalid card in card_order_json" });
 
   
+  const answerTimeLimit = Number(session.answer_time_limit || 120);
+
+  // NORMAL
+  if (promptType === "NORMAL_HIDDEN") {
+    return res.json({
+      difficulty_mode: "MODERATE",
+      phase: "TEST",
+      group: { index: groupIndex + 1, size: gs },
+      progress: { answered_in_group: testIndex + 1, group_total: groupEnd - groupStart },
+      flashcard_id: card.flashcard_id,
+      question: card.question,
+      answer_time_limit: answerTimeLimit,
+      prompt_type: "NORMAL_HIDDEN",
+    });
+  }
+
+  // BLANKS (generate from answer like HARD TEST)
+  const payload = { text: card.answer, variation_type: promptType };
+
+  if (
+    promptType === "RANDOM_BLANKS" ||
+    promptType === "RANDOM_FULL_BLANKS" ||
+    promptType === "INCREASING_DIFFICULTY"
+  ) {
+    if (settings.blank_ratio !== null && settings.blank_ratio !== undefined) {
+      payload.blank_ratio = Number(settings.blank_ratio);
+    }
+    payload.seed = seed + absoluteIndex;
+  }
+
+  if (promptType === "INCREASING_DIFFICULTY") {
+    const attemptRows = await query(
+      "SELECT COUNT(*) AS c FROM performance_result WHERE session_id = ? AND flashcard_id = ?",
+      [sessionId, card.flashcard_id]
+    );
+    payload.attempt_number = Number(attemptRows[0]?.c || 0) + 1;
+  }
+
+  if (promptType === "DIFFICULTY_LEVEL_BLANKS") {
+    const stats = await query(
+      "SELECT COALESCE(difficulty_rating, 0) AS difficulty_rating FROM user_flashcard_stats WHERE user_id = ? AND flashcard_id = ?",
+      [req.user.userId, card.flashcard_id]
+    );
+
+    const rating = Math.max(0, Math.min(100, Number(stats[0]?.difficulty_rating ?? 0)));
+
+    let difficulty_level = 1;
+    if (rating > 75) difficulty_level = 4;
+    else if (rating > 50) difficulty_level = 3;
+    else if (rating > 25) difficulty_level = 2;
+
+    payload.difficulty_level = difficulty_level;
+  }
+
+  const axRes = await axios.post(`${nlpUrl}/generate`, payload);
+
   return res.json({
     difficulty_mode: "MODERATE",
     phase: "TEST",
@@ -873,7 +993,10 @@ if (String(session.difficulty_mode) === "MODERATE") {
     progress: { answered_in_group: testIndex + 1, group_total: groupEnd - groupStart },
     flashcard_id: card.flashcard_id,
     question: card.question,
-    answer_time_limit: Number(session.answer_time_limit || 120),
+    answer_time_limit: answerTimeLimit,
+    prompt_type: promptType,
+    blanked_text: axRes.data.blanked_text,
+    first_letter_clues: axRes.data.first_letter_clues,
   });
 }
 
@@ -912,9 +1035,10 @@ router.post("/:sessionId/answer", requireAuth, async (req, res) => {
       return res.status(400).json({ message: "Cannot submit answers during HARD preview phase" });
     }
 
-    if (String(session.difficulty_mode) === "EASY" && String(session.easy_phase || "REVEAL") !== "ANSWER") {
-      return res.status(400).json({ message: "Not in answer phase yet" });
+    if (String(session.difficulty_mode) === "EASY" && String(session.easy_phase || "PREVIEW") !== "TEST") {
+      return res.status(400).json({ message: "Not in test phase yet" });
     }
+
 
 
     if (String(session.difficulty_mode) === "MODERATE" && String(session.moderate_phase || "PREVIEW") === "PREVIEW") {
@@ -964,6 +1088,19 @@ router.post("/:sessionId/answer", requireAuth, async (req, res) => {
       }
     }
 
+    function normalizeForFullSentence(s) {
+  return String(s ?? "")
+    .toLowerCase()
+    .trim()
+    // normalize common unicode punctuation
+    .replace(/[’‘]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[–—]/g, "-")
+    // remove punctuation (keep letters/numbers/space)
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ");
+}
+
 
     // Enforce answering the current card (EASY)
     if (String(session.difficulty_mode) === "EASY") {
@@ -995,9 +1132,8 @@ router.post("/:sessionId/answer", requireAuth, async (req, res) => {
 
 
     const correctAnswer = cardRows[0].answer; // Correct answer
-
-
-    const is_correct = normalizeAnswer(user_answer) === normalizeAnswer(correctAnswer) ? 1 : 0; // Compare
+    const is_correct =
+      normalizeForFullSentence(user_answer) === normalizeForFullSentence(correctAnswer) ? 1 : 0;
 
 
     const attemptRows = await query(
@@ -1027,8 +1163,8 @@ router.post("/:sessionId/answer", requireAuth, async (req, res) => {
     if (String(session.difficulty_mode) === "EASY") {
       await query(
         `UPDATE practice_session
-        SET easy_index = easy_index + 1,
-            easy_phase = 'REVEAL'
+         SET easy_index = easy_index + 1,
+            easy_phase = 'PREVIEW'
         WHERE session_id = ?`,
         [sessionId]
       );
