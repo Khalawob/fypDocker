@@ -94,6 +94,82 @@ async function computeAdaptiveTimeSeconds({ // Define adaptive timing calculator
   };
 }
 
+// Count "blanks" in blanked_text (underscore runs like ____ or r________)
+function countBlanks(blankedText) {
+  const s = String(blankedText || "");
+  if (!s) return 0;
+  const matches = s.match(/_{2,}/g); // runs of 2+ underscores
+  return matches ? matches.length : 0;
+}
+
+// Adaptive ANSWER time (seconds) based on:
+// - user reading speed (wps)
+// - per-user difficulty_rating (0..100)
+// - question + (answer OR blanked_text) word count
+// - number of blanks
+async function computeAdaptiveAnswerLimitSeconds({
+  userId,
+  flashcardId,
+  questionText,
+  answerText,
+  blankedText,               // optional (if blanks mode)
+  baseAnswerLimitSeconds,    // session.answer_time_limit (e.g. 120)
+  readingSpeedModifier,      // settings.reading_speed_modifier
+}) {
+  const wps = await getUserWordsPerSecond(userId);
+  const rating = await getUserDifficultyRating(userId, flashcardId);
+
+  const qWords = countWords(questionText);
+  const aWords = countWords(answerText);
+  const bWords = countWords(blankedText);
+
+  // If blanks exist, user reads question + blanked text; else question + answer
+  const totalWordsToProcess = blankedText ? (qWords + bWords) : (qWords + aWords);
+
+  const blanks = countBlanks(blankedText);
+
+  const baseLimit = Number(baseAnswerLimitSeconds || 120);
+  const safeBase = Number.isFinite(baseLimit) ? clamp(baseLimit, 30, 300) : 120;
+
+  const modifier = Number(readingSpeedModifier || 1.0);
+  const safeModifier = Number.isFinite(modifier) ? clamp(modifier, 0.5, 2.0) : 1.0;
+
+  // Model:
+  // - reading/thinking time depends on words and wps
+  // - difficulty scales it up
+  // - blanks add fixed overhead
+  const readingThinkingSeconds = (Math.max(1, totalWordsToProcess) / wps) * 2.0;
+  const difficultyMultiplier = 1.0 + (rating / 100) * 0.8; // 1.0..1.8
+  const blanksPenalty = blanks * 1.5; // seconds per blank
+
+  const raw =
+    (safeBase * 0.6) +
+    (readingThinkingSeconds * difficultyMultiplier * 4) +
+    blanksPenalty;
+
+  const finalSeconds = clamp(raw * safeModifier, 30, 300);
+
+  return {
+    seconds: Math.round(finalSeconds),
+    debug: {
+      words_per_second: Number(wps.toFixed(2)),
+      difficulty_rating: rating,
+      question_words: qWords,
+      answer_words: aWords,
+      blanked_words: bWords,
+      total_words_used: totalWordsToProcess,
+      blanks_count: blanks,
+      base_answer_limit: safeBase,
+      difficulty_multiplier: Number(difficultyMultiplier.toFixed(2)),
+      reading_speed_modifier: Number(safeModifier.toFixed(2)),
+      raw_seconds: Number(raw.toFixed(2)),
+      final_seconds: Math.round(finalSeconds),
+    },
+  };
+}
+
+
+
 // Deterministic PRNG (seeded randomness)
 function mulberry32(seed) {
   let a = seed >>> 0; // Force unsigned 32-bit
@@ -116,16 +192,6 @@ function seededShuffle(arr, seed) {
     [a[i], a[j]] = [a[j], a[i]]; // Swap elements
   }
   return a; // Return shuffled array
-}
-
-
-// Normalize answers for comparison (ignore punctuation/case)
-function normalizeAnswer(s) {
-  return String(s ?? "") // Convert to string safely
-    .toLowerCase() // Ignore case
-    .trim() // Remove leading/trailing spaces
-    .replace(/[^\w\s]/g, "") // Remove punctuation
-    .replace(/\s+/g, " "); // Collapse multiple spaces
 }
 
 
@@ -465,13 +531,12 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
 
         let displayTimeToSend = Number(session.display_time_per_card || 10); // Reading time
         let timingDebug = null; // Optional debug info
-        const answerTimeLimit = Number(session.answer_time_limit || 120); // Answering time limit
 
         if (settings.use_adaptive_timing) {
           const timing = await computeAdaptiveTimeSeconds({
             userId: req.user.userId,
             flashcardId: card.flashcard_id,
-            textForTiming: card.answer,
+            textForTiming: `${card.question} ${card.answer}`, // Use full text for timing in preview
             readingSpeedModifier: settings.reading_speed_modifier,
           });
 
@@ -486,6 +551,8 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
           phase: "PREVIEW", // Phase
           display_time_per_card: displayTimeToSend, // display card tome
           answer_time_limit: answerTimeLimit,       // answer card time
+          adaptive_time: !!settings.use_adaptive_timing,
+          timing_debug: timingDebug,
           progress: { index: idx + 1, total: cards.length }, // Preview progress
           flashcard_id: card.flashcard_id, // Card id
           question: card.question, // Question
@@ -551,35 +618,50 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
 
       // NORMAL_HIDDEN in TEST: show question only
       if (promptType === "NORMAL_HIDDEN") {
-        let displayTimeToSend = Number(session.display_time_per_card || 10); // Reading time
-        let timingDebug = null; // Optional debug
-        const answerTimeLimit = Number(session.answer_time_limit || 120); // Answer time limit
+        let displayTimeToSend = Number(session.display_time_per_card || 10);
+        let timingDebug = null;
 
+        // BASE answer limit from session
+        let answerTimeLimitToSend = Number(session.answer_time_limit || 120);
+        let answerTimingDebug = null;
 
         if (settings.use_adaptive_timing) {
+          // Reading time (for showing the question)
           const timing = await computeAdaptiveTimeSeconds({
             userId: req.user.userId,
             flashcardId: card.flashcard_id,
             textForTiming: card.question,
             readingSpeedModifier: settings.reading_speed_modifier,
           });
-
           displayTimeToSend = timing.seconds;
           timingDebug = timing.debug;
+
+          // Answer time (user must type answer)
+          const at = await computeAdaptiveAnswerLimitSeconds({
+            userId: req.user.userId,
+            flashcardId: card.flashcard_id,
+            questionText: card.question,
+            answerText: card.answer,
+            blankedText: null,
+            baseAnswerLimitSeconds: answerTimeLimitToSend,
+            readingSpeedModifier: settings.reading_speed_modifier,
+          });
+          answerTimeLimitToSend = at.seconds;
+          answerTimingDebug = at.debug;
         }
 
-        
         return res.json({
-          difficulty_mode: "HARD", // Mode
-          phase: "TEST", // Phase
+          difficulty_mode: "HARD",
+          phase: "TEST",
           display_time_per_card: displayTimeToSend,
-          answer_time_limit: answerTimeLimit,
+          answer_time_limit: answerTimeLimitToSend,
           adaptive_time: !!settings.use_adaptive_timing,
           timing_debug: timingDebug,
-          progress: { remaining: remaining.length, total: cards.length }, // Remaining count
-          flashcard_id: card.flashcard_id, // Card id
-          question: card.question, // Question
-          prompt_type: "NORMAL_HIDDEN", // Prompt type
+          answer_timing_debug: answerTimingDebug,
+          progress: { remaining: remaining.length, total: cards.length },
+          flashcard_id: card.flashcard_id,
+          question: card.question,
+          prompt_type: "NORMAL_HIDDEN",
         });
       }
 
@@ -628,38 +710,54 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
 
       const axRes = await axios.post(`${nlpUrl}/generate`, payload); // Call NLP service
 
-      let displayTimeToSend = Number(session.display_time_per_card || 10); // Reading time
-      let timingDebug = null; // Optional debug
-      const answerTimeLimit = Number(session.answer_time_limit || 120); // Answer time limit
+      let displayTimeToSend = Number(session.display_time_per_card || 10);
+      let timingDebug = null;
 
+      // BASE answer limit from session
+      let answerTimeLimitToSend = Number(session.answer_time_limit || 120);
+      let answerTimingDebug = null;
+
+      const blankedText = axRes.data.blanked_text || null;
 
       if (settings.use_adaptive_timing) {
+        // Reading time (blanked text is what user reads in TEST)
         const timing = await computeAdaptiveTimeSeconds({
           userId: req.user.userId,
           flashcardId: card.flashcard_id,
-          textForTiming: axRes.data.blanked_text || card.answer,
+          textForTiming: blankedText || card.answer,
           readingSpeedModifier: settings.reading_speed_modifier,
         });
-
         displayTimeToSend = timing.seconds;
         timingDebug = timing.debug;
+
+        // Answer time (depends on question + blanked text + blanks count + difficulty)
+        const at = await computeAdaptiveAnswerLimitSeconds({
+          userId: req.user.userId,
+          flashcardId: card.flashcard_id,
+          questionText: card.question,
+          answerText: card.answer,
+          blankedText,
+          baseAnswerLimitSeconds: answerTimeLimitToSend,
+          readingSpeedModifier: settings.reading_speed_modifier,
+        });
+        answerTimeLimitToSend = at.seconds;
+        answerTimingDebug = at.debug;
       }
 
-
-
       return res.json({
-        difficulty_mode: "HARD", // Mode
-        phase: "TEST", // Phase
-        display_time_per_card: displayTimeToSend, // Reading time (adaptive affects this)
-        answer_time_limit: answerTimeLimit, // Answer time limit
+        difficulty_mode: "HARD",
+        phase: "TEST",
+        display_time_per_card: displayTimeToSend,
+        answer_time_limit: answerTimeLimitToSend,
         adaptive_time: !!settings.use_adaptive_timing,
         timing_debug: timingDebug,
-        progress: { remaining: remaining.length, total: cards.length }, // Remaining count
-        flashcard_id: card.flashcard_id, // Card id
-        question: card.question, // Question
-        prompt_type: promptType, // Prompt type
-        blanked_text: axRes.data.blanked_text, // Variation output
-        first_letter_clues: axRes.data.first_letter_clues, // Clues output
+        answer_timing_debug: answerTimingDebug,
+        progress: { remaining: remaining.length, total: cards.length },
+        flashcard_id: card.flashcard_id,
+        question: card.question,
+        prompt_type: promptType,
+        blanked_text: axRes.data.blanked_text,
+        first_letter_clues: axRes.data.first_letter_clues,
       });
     }
 
@@ -715,8 +813,6 @@ if (String(session.difficulty_mode) === "EASY") {
   const card = cardById.get(Number(cardId));
   if (!card) return res.status(500).json({ message: "Invalid card in card_order_json" });
 
-  const answerTimeLimit = Number(session.answer_time_limit || 120);
-
   // -------- PREVIEW: show full answer, then flip to TEST --------
   if (phase === "PREVIEW") {
     let revealSeconds = 15;
@@ -726,7 +822,7 @@ if (String(session.difficulty_mode) === "EASY") {
       const timing = await computeAdaptiveTimeSeconds({
         userId: req.user.userId,
         flashcardId: card.flashcard_id,
-        textForTiming: card.answer,
+        textForTiming: `${card.question} ${card.answer}`,
         readingSpeedModifier: settings.reading_speed_modifier,
       });
       revealSeconds = timing.seconds;
@@ -756,13 +852,30 @@ if (String(session.difficulty_mode) === "EASY") {
   if (phase === "TEST") {
     // NORMAL
     if (promptType === "NORMAL_HIDDEN") {
+      let answerTimeLimitToSend = Number(session.answer_time_limit || 120);
+      let answerTimingDebug = null;
+
+    if (settings.use_adaptive_timing) {
+        const at = await computeAdaptiveAnswerLimitSeconds({
+          userId: req.user.userId,
+          flashcardId: card.flashcard_id,
+          questionText: card.question,
+          answerText: card.answer,
+          blankedText: null,
+          baseAnswerLimitSeconds: answerTimeLimitToSend,
+          readingSpeedModifier: settings.reading_speed_modifier,
+        });
+        answerTimeLimitToSend = at.seconds;
+        answerTimingDebug = at.debug;
+      }
       return res.json({
         difficulty_mode: "EASY",
         phase: "TEST",
         progress: { current: idx + 1, total: orderedIds.length },
         flashcard_id: card.flashcard_id,
         question: card.question,
-        answer_time_limit: answerTimeLimit,
+        answer_time_limit: answerTimeLimitToSend,
+        answer_timing_debug: answerTimingDebug,
         prompt_type: "NORMAL_HIDDEN",
       });
     }
@@ -807,13 +920,33 @@ if (String(session.difficulty_mode) === "EASY") {
 
     const axRes = await axios.post(`${nlpUrl}/generate`, payload);
 
+    const blankedText = axRes.data.blanked_text || null;
+
+    let answerTimeLimitToSend = Number(session.answer_time_limit || 120);
+    let answerTimingDebug = null;
+
+    if (settings.use_adaptive_timing) {
+      const at = await computeAdaptiveAnswerLimitSeconds({
+        userId: req.user.userId,
+        flashcardId: card.flashcard_id,
+        questionText: card.question,
+        answerText: card.answer,
+        blankedText,
+        baseAnswerLimitSeconds: answerTimeLimitToSend,
+        readingSpeedModifier: settings.reading_speed_modifier,
+      });
+      answerTimeLimitToSend = at.seconds;
+      answerTimingDebug = at.debug;
+    }
+
     return res.json({
       difficulty_mode: "EASY",
       phase: "TEST",
       progress: { current: idx + 1, total: orderedIds.length },
       flashcard_id: card.flashcard_id,
       question: card.question,
-      answer_time_limit: answerTimeLimit,
+      answer_time_limit: answerTimeLimitToSend,
+      answer_timing_debug: answerTimingDebug,
       prompt_type: promptType,
       blanked_text: axRes.data.blanked_text,
       first_letter_clues: axRes.data.first_letter_clues,
@@ -881,7 +1014,7 @@ if (String(session.difficulty_mode) === "MODERATE") {
       const timing = await computeAdaptiveTimeSeconds({
         userId: req.user.userId,
         flashcardId: card.flashcard_id,
-        textForTiming: card.answer,
+        textForTiming: `${card.question} ${card.answer}`,
         readingSpeedModifier: settings.reading_speed_modifier,
       });
       revealSeconds = timing.seconds;
@@ -929,11 +1062,25 @@ if (String(session.difficulty_mode) === "MODERATE") {
   const card = cardById.get(Number(cardId));
   if (!card) return res.status(500).json({ message: "Invalid card in card_order_json" });
 
-  
-  const answerTimeLimit = Number(session.answer_time_limit || 120);
-
   // NORMAL
   if (promptType === "NORMAL_HIDDEN") {
+    let answerTimeLimitToSend = Number(session.answer_time_limit || 120);
+    let answerTimingDebug = null;
+
+    if (settings.use_adaptive_timing) {
+      const at = await computeAdaptiveAnswerLimitSeconds({
+        userId: req.user.userId,
+        flashcardId: card.flashcard_id,
+        questionText: card.question,
+        answerText: card.answer,
+        blankedText: null,
+        baseAnswerLimitSeconds: answerTimeLimitToSend,
+        readingSpeedModifier: settings.reading_speed_modifier,
+      });
+      answerTimeLimitToSend = at.seconds;
+      answerTimingDebug = at.debug;
+    }
+
     return res.json({
       difficulty_mode: "MODERATE",
       phase: "TEST",
@@ -941,7 +1088,8 @@ if (String(session.difficulty_mode) === "MODERATE") {
       progress: { answered_in_group: testIndex + 1, group_total: groupEnd - groupStart },
       flashcard_id: card.flashcard_id,
       question: card.question,
-      answer_time_limit: answerTimeLimit,
+      answer_time_limit: answerTimeLimitToSend,
+      answer_timing_debug: answerTimingDebug,
       prompt_type: "NORMAL_HIDDEN",
     });
   }
@@ -986,6 +1134,25 @@ if (String(session.difficulty_mode) === "MODERATE") {
 
   const axRes = await axios.post(`${nlpUrl}/generate`, payload);
 
+  const blankedText = axRes.data.blanked_text || null;
+
+  let answerTimeLimitToSend = Number(session.answer_time_limit || 120);
+  let answerTimingDebug = null;
+
+  if (settings.use_adaptive_timing) {
+    const at = await computeAdaptiveAnswerLimitSeconds({
+      userId: req.user.userId,
+      flashcardId: card.flashcard_id,
+      questionText: card.question,
+      answerText: card.answer,
+      blankedText,
+      baseAnswerLimitSeconds: answerTimeLimitToSend,
+      readingSpeedModifier: settings.reading_speed_modifier,
+    });
+    answerTimeLimitToSend = at.seconds;
+    answerTimingDebug = at.debug;
+  }
+
   return res.json({
     difficulty_mode: "MODERATE",
     phase: "TEST",
@@ -993,7 +1160,8 @@ if (String(session.difficulty_mode) === "MODERATE") {
     progress: { answered_in_group: testIndex + 1, group_total: groupEnd - groupStart },
     flashcard_id: card.flashcard_id,
     question: card.question,
-    answer_time_limit: answerTimeLimit,
+    answer_time_limit: answerTimeLimitToSend,
+    answer_timing_debug: answerTimingDebug,
     prompt_type: promptType,
     blanked_text: axRes.data.blanked_text,
     first_letter_clues: axRes.data.first_letter_clues,
