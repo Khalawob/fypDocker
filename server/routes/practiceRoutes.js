@@ -329,8 +329,10 @@ router.post("/start", requireAuth, async (req, res) => {
       answer_time_limit = null, // answering time limit (default 2 minutes)
       group_size = 5, // MODERATE grouping size
       randomize_order = true, // Shuffle option
-      use_adaptive_timing = false, // Future feature
-      reading_speed_modifier = 1.0, // Future feature
+      use_adaptive_timing = false, // legacy (kept for backward compatibility)
+      use_adaptive_preview_timing = null, // new (null means "inherit from legacy")
+      use_adaptive_answer_timing = null,  // new (null means "inherit from legacy")
+      reading_speed_modifier = 1.0, // User-controlled timing modifier (e.g. 0.8 for 20% faster, 1.2 for 20% slower)
       prompt_type = "NORMAL_HIDDEN", // NORMAL_HIDDEN or NLP variation type
       blank_ratio = null, // For random blanking types
       seed = null, // For deterministic randomness
@@ -417,17 +419,35 @@ router.post("/start", requireAuth, async (req, res) => {
       params
     );
 
+    // Backward compatible behavior:
+    // If new toggles are omitted (null), inherit from legacy use_adaptive_timing.
+    const adaptivePreview =
+      use_adaptive_preview_timing === null || use_adaptive_preview_timing === undefined
+        ? !!use_adaptive_timing
+        : !!use_adaptive_preview_timing;
 
-    
+    const adaptiveAnswer =
+      use_adaptive_answer_timing === null || use_adaptive_answer_timing === undefined
+        ? !!use_adaptive_timing
+        : !!use_adaptive_answer_timing;
+
+  
     await query(
       `INSERT INTO practice_settings
-       (session_id, group_size, randomize_order, use_adaptive_timing, reading_speed_modifier, prompt_type, blank_ratio, seed)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, // Insert settings row
+       (session_id, group_size, randomize_order, 
+       use_adaptive_timing, use_adaptive_preview_timing, use_adaptive_answer_timing, 
+       reading_speed_modifier, prompt_type, blank_ratio, seed)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, // Insert settings row
       [
         session_id, // FK to session
         group_size, // Store group size
         !!randomize_order, // Store boolean shuffle
+
+        //legacy and new split toggles
         !!use_adaptive_timing, // Store boolean adaptive timing
+        adaptivePreview, // Store adaptive preview timing
+        adaptiveAnswer, // Store adaptive answer timing
+
         Number(reading_speed_modifier) || 1.0, // Store reading speed modifier
         String(prompt_type), // Store prompt type
         blank_ratio !== null && blank_ratio !== undefined ? Number(blank_ratio) : null, // Store blank ratio
@@ -532,7 +552,7 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
         let displayTimeToSend = Number(session.display_time_per_card || 10); // Reading time
         let timingDebug = null; // Optional debug info
 
-        if (settings.use_adaptive_timing) {
+        if (settings.use_adaptive_preview_timing) {
           const timing = await computeAdaptiveTimeSeconds({
             userId: req.user.userId,
             flashcardId: card.flashcard_id,
@@ -544,14 +564,15 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
           timingDebug = timing.debug;
         }
 
-
+        const answerTimeLimit = Number(session.answer_time_limit || 120);
 
         return res.json({
           difficulty_mode: "HARD", // Mode
           phase: "PREVIEW", // Phase
           display_time_per_card: displayTimeToSend, // display card tome
           answer_time_limit: answerTimeLimit,       // answer card time
-          adaptive_time: !!settings.use_adaptive_timing,
+          adaptive_preview_time: !!settings.use_adaptive_preview_timing,
+          adaptive_answer_time: !!settings.use_adaptive_answer_timing,
           timing_debug: timingDebug,
           progress: { index: idx + 1, total: cards.length }, // Preview progress
           flashcard_id: card.flashcard_id, // Card id
@@ -625,7 +646,7 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
         let answerTimeLimitToSend = Number(session.answer_time_limit || 120);
         let answerTimingDebug = null;
 
-        if (settings.use_adaptive_timing) {
+        if (settings.use_adaptive_answer_timing) {
           // Reading time (for showing the question)
           const timing = await computeAdaptiveTimeSeconds({
             userId: req.user.userId,
@@ -655,7 +676,8 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
           phase: "TEST",
           display_time_per_card: displayTimeToSend,
           answer_time_limit: answerTimeLimitToSend,
-          adaptive_time: !!settings.use_adaptive_timing,
+          adaptive_preview_time: !!settings.use_adaptive_preview_timing,
+          adaptive_answer_time: !!settings.use_adaptive_answer_timing,
           timing_debug: timingDebug,
           answer_timing_debug: answerTimingDebug,
           progress: { remaining: remaining.length, total: cards.length },
@@ -719,7 +741,7 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
 
       const blankedText = axRes.data.blanked_text || null;
 
-      if (settings.use_adaptive_timing) {
+      if (settings.use_adaptive_answer_timing) {
         // Reading time (blanked text is what user reads in TEST)
         const timing = await computeAdaptiveTimeSeconds({
           userId: req.user.userId,
@@ -749,7 +771,8 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
         phase: "TEST",
         display_time_per_card: displayTimeToSend,
         answer_time_limit: answerTimeLimitToSend,
-        adaptive_time: !!settings.use_adaptive_timing,
+        adaptive_preview_time: !!settings.use_adaptive_preview_timing,
+        adaptive_answer_time: !!settings.use_adaptive_answer_timing,
         timing_debug: timingDebug,
         answer_timing_debug: answerTimingDebug,
         progress: { remaining: remaining.length, total: cards.length },
@@ -818,7 +841,7 @@ if (String(session.difficulty_mode) === "EASY") {
     let revealSeconds = 15;
     let timingDebug = null;
 
-    if (settings.use_adaptive_timing) {
+    if (settings.use_adaptive_preview_timing) {
       const timing = await computeAdaptiveTimeSeconds({
         userId: req.user.userId,
         flashcardId: card.flashcard_id,
@@ -855,7 +878,7 @@ if (String(session.difficulty_mode) === "EASY") {
       let answerTimeLimitToSend = Number(session.answer_time_limit || 120);
       let answerTimingDebug = null;
 
-    if (settings.use_adaptive_timing) {
+    if (settings.use_adaptive_answer_timing) {
         const at = await computeAdaptiveAnswerLimitSeconds({
           userId: req.user.userId,
           flashcardId: card.flashcard_id,
@@ -925,7 +948,7 @@ if (String(session.difficulty_mode) === "EASY") {
     let answerTimeLimitToSend = Number(session.answer_time_limit || 120);
     let answerTimingDebug = null;
 
-    if (settings.use_adaptive_timing) {
+    if (settings.use_adaptive_answer_timing) {
       const at = await computeAdaptiveAnswerLimitSeconds({
         userId: req.user.userId,
         flashcardId: card.flashcard_id,
@@ -1010,7 +1033,7 @@ if (String(session.difficulty_mode) === "MODERATE") {
     let revealSeconds = 15;
     let timingDebug = null;
 
-    if (settings.use_adaptive_timing) {
+    if (settings.use_adaptive_preview_timing) {
       const timing = await computeAdaptiveTimeSeconds({
         userId: req.user.userId,
         flashcardId: card.flashcard_id,
@@ -1067,7 +1090,7 @@ if (String(session.difficulty_mode) === "MODERATE") {
     let answerTimeLimitToSend = Number(session.answer_time_limit || 120);
     let answerTimingDebug = null;
 
-    if (settings.use_adaptive_timing) {
+    if (settings.use_adaptive_answer_timing) {
       const at = await computeAdaptiveAnswerLimitSeconds({
         userId: req.user.userId,
         flashcardId: card.flashcard_id,
@@ -1139,7 +1162,7 @@ if (String(session.difficulty_mode) === "MODERATE") {
   let answerTimeLimitToSend = Number(session.answer_time_limit || 120);
   let answerTimingDebug = null;
 
-  if (settings.use_adaptive_timing) {
+  if (settings.use_adaptive_answer_timing) {
     const at = await computeAdaptiveAnswerLimitSeconds({
       userId: req.user.userId,
       flashcardId: card.flashcard_id,

@@ -119,7 +119,14 @@ CREATE TABLE IF NOT EXISTS practice_settings (
   session_id            INT NOT NULL,
   group_size            INT NOT NULL DEFAULT 5,
   randomize_order       BOOLEAN NOT NULL DEFAULT TRUE,
+
+  -- Legacy toggle (keep for backward compatibility)
   use_adaptive_timing   BOOLEAN NOT NULL DEFAULT FALSE,
+
+  -- New split toggles
+  use_adaptive_preview_timing BOOLEAN NOT NULL DEFAULT FALSE,
+  use_adaptive_answer_timing  BOOLEAN NOT NULL DEFAULT FALSE,
+
   reading_speed_modifier FLOAT NOT NULL DEFAULT 1.0,
   prompt_type VARCHAR(50) NOT NULL DEFAULT 'NORMAL_HIDDEN',
   blank_ratio FLOAT NULL,
