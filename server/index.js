@@ -10,6 +10,7 @@ const variationRoutes = require("./routes/variationRoutes"); // NLP variation ro
 const sessionRoutes = require("./routes/sessionRoutes");     // Session routes (router + completion)
 const practiceRoutes = require("./routes/practiceRoutes");   // Practice engine routes
 const calibrationRoutes = require("./routes/calibrationRoutes"); // Calibration routes 
+const profileRoutes = require("./routes/profileRoutes"); // User profile routes
 
 
 const app = express();  // Create Express app
@@ -39,6 +40,9 @@ app.use("/api/practice", practiceRoutes);
 
 // Calibration route for testing reading speed and timing
 app.use("/api", calibrationRoutes);
+
+// User profile routes
+app.use("/api/profile", profileRoutes);
 
 // End points for tests
 

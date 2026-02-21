@@ -730,7 +730,7 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
       }
 
 
-      const axRes = await axios.post(`${nlpUrl}/generate`, payload); // Call NLP service
+      const axRes = await axios.post(`${nlpUrl}/generate`, payload); // Call NLP service to get prompt variation
 
       let displayTimeToSend = Number(session.display_time_per_card || 10);
       let timingDebug = null;
@@ -941,7 +941,7 @@ if (String(session.difficulty_mode) === "EASY") {
       payload.difficulty_level = difficulty_level;
     }
 
-    const axRes = await axios.post(`${nlpUrl}/generate`, payload);
+    const axRes = await axios.post(`${nlpUrl}/generate`, payload); // call NLP for blanked version of answer
 
     const blankedText = axRes.data.blanked_text || null;
 
@@ -1155,7 +1155,7 @@ if (String(session.difficulty_mode) === "MODERATE") {
     payload.difficulty_level = difficulty_level;
   }
 
-  const axRes = await axios.post(`${nlpUrl}/generate`, payload);
+  const axRes = await axios.post(`${nlpUrl}/generate`, payload); // call NLP for blanked version of answer
 
   const blankedText = axRes.data.blanked_text || null;
 

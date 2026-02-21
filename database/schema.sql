@@ -219,3 +219,24 @@ CREATE TABLE IF NOT EXISTS user_calibration (
     ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+
+CREATE TABLE IF NOT EXISTS user_profile (
+  user_id INT PRIMARY KEY,
+  display_name VARCHAR(80) NULL,
+  bio VARCHAR(255) NULL,
+  avatar_url VARCHAR(255) NULL,
+
+  -- app preferences / personalization
+  timezone VARCHAR(64) NULL,
+  study_goal_minutes_per_day INT NULL,
+  preferred_difficulty ENUM('EASY','MODERATE','HARD') NULL,
+
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  CONSTRAINT fk_user_profile_user
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+    ON DELETE CASCADE
+);
+
+

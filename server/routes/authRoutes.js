@@ -18,11 +18,20 @@ router.post("/register", async (req, res) => {
   db.query(
     "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)",
     [username, email, hash],
-    (err) => {
-      if (err) {
+    (err, result) => {
+      if (err) 
         return res.status(500).json({ error: err.message });
-      }
-      res.json({ message: "User registered successfully" });
+
+      const newUserId = result.insertId;
+
+      db.query(
+        "INSERT INTO user_profile (user_id) VALUES (?)",
+        [newUserId],
+        (err2) => {
+          if (err2) return res.status(500).json({ error: err2.message });
+          res.json({ message: "User registered successfully" });
+        }
+      )
     }
   );
 });
