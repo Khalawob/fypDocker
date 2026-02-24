@@ -32,6 +32,9 @@ router.get("/me", requireAuth, async (req, res) => {
          p.timezone,
          p.study_goal_minutes_per_day,
          p.preferred_difficulty,
+         p.current_streak,
+         p.longest_streak,
+         p.last_login_date,
          p.created_at,
          p.updated_at
        FROM users u
@@ -50,6 +53,7 @@ router.get("/me", requireAuth, async (req, res) => {
            u.user_id, u.username, u.email,
            p.display_name, p.bio, p.avatar_url, p.timezone,
            p.study_goal_minutes_per_day, p.preferred_difficulty,
+           p.current_streak, p.longest_streak, p.last_login_date,
            p.created_at, p.updated_at
          FROM users u
          LEFT JOIN user_profile p ON p.user_id = u.user_id

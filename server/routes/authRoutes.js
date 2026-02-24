@@ -5,6 +5,15 @@ const db = require("../db");
 
 const router = express.Router();
 
+function query(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.query(sql, params, (err, results) => {
+      if (err) return reject(err);
+      resolve(results);
+    });
+  });
+}
+
 // register
 router.post("/register", async (req, res) => {
   const { username, email, password } = req.body;
@@ -76,6 +85,14 @@ router.post("/login", (req, res) => {
         { expiresIn: "1h" }
       );
 
+      try {
+        await updateLoginStreak(user.user_id);
+        await awardStreakBadges(user.user_id);
+      } catch (e) {
+        console.error("Streak/badge update failed:", e);
+        // do NOT block login if gamification fails
+      }
+      
       res.json({
         message: "Login successful",
         token,
@@ -88,5 +105,78 @@ router.post("/login", (req, res) => {
     }
   );
 });
+
+// Function for login streak
+async function updateLoginStreak(userId) {
+  const rows = await query(
+    "SELECT current_streak, longest_streak, last_login_date FROM user_profile WHERE user_id = ?",
+    [userId]
+  );
+
+  const profile = rows?.[0] || { current_streak: 0, longest_streak: 0, last_login_date: null };
+
+  // Use server-local date (UK) OR use user timezone later. Start simple: server date.
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10); // YYYY-MM-DD (UTC). If you want UK local day, use a timezone lib.
+
+  const last = profile.last_login_date ? new Date(profile.last_login_date) : null;
+
+  // Helper: difference in whole days using YYYY-MM-DD strings
+  const toYMD = (d) => new Date(d).toISOString().slice(0, 10);
+
+  let newStreak = profile.current_streak;
+
+  if (!profile.last_login_date) {
+    newStreak = 1;
+  } else {
+    const lastStr = toYMD(profile.last_login_date);
+    if (lastStr === todayStr) {
+      return; // already counted today
+    }
+
+    // yesterday in UTC-based day
+    const y = new Date(today);
+    y.setUTCDate(y.getUTCDate() - 1);
+    const yesterdayStr = y.toISOString().slice(0, 10);
+
+    newStreak = (lastStr === yesterdayStr) ? (profile.current_streak + 1) : 1;
+  }
+
+  const newLongest = Math.max(profile.longest_streak, newStreak);
+
+  await query(
+    `UPDATE user_profile
+     SET current_streak = ?, longest_streak = ?, last_login_date = ?
+     WHERE user_id = ?`,
+    [newStreak, newLongest, todayStr, userId]
+  );
+}
+
+
+async function awardStreakBadges(userId) {
+  const p = await query("SELECT current_streak FROM user_profile WHERE user_id = ?", [userId]);
+  const streak = p?.[0]?.current_streak || 0;
+
+  const codesToCheck = [];
+  if (streak >= 3) codesToCheck.push("STREAK_3");
+  if (streak >= 7) codesToCheck.push("STREAK_7");
+  if (streak >= 30) codesToCheck.push("STREAK_30");
+
+  if (codesToCheck.length === 0) return;
+
+  const badgeRows = await query(
+    `SELECT badge_id FROM badges WHERE code IN (${codesToCheck.map(() => "?").join(",")})`,
+    codesToCheck
+  );
+
+  for (const b of badgeRows) {
+    await query(
+      "INSERT IGNORE INTO user_badges (user_id, badge_id) VALUES (?, ?)",
+      [userId, b.badge_id]
+    );
+  }
+}
+
+
 
 module.exports = router;

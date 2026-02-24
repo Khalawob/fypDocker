@@ -120,10 +120,10 @@ CREATE TABLE IF NOT EXISTS practice_settings (
   group_size            INT NOT NULL DEFAULT 5,
   randomize_order       BOOLEAN NOT NULL DEFAULT TRUE,
 
-  -- Legacy toggle (keep for backward compatibility)
+  -- Legacy toggle (keeping for backward compatibility)
   use_adaptive_timing   BOOLEAN NOT NULL DEFAULT FALSE,
 
-  -- New split toggles
+  -- New split toggles for adaptive preview timing and adaptive answer timing
   use_adaptive_preview_timing BOOLEAN NOT NULL DEFAULT FALSE,
   use_adaptive_answer_timing  BOOLEAN NOT NULL DEFAULT FALSE,
 
@@ -220,6 +220,35 @@ CREATE TABLE IF NOT EXISTS user_calibration (
 ) ENGINE=InnoDB;
 
 
+CREATE TABLE IF NOT EXISTS badges (
+  badge_id INT AUTO_INCREMENT PRIMARY KEY,
+  code VARCHAR(64) NOT NULL UNIQUE,        -- e.g. "STREAK_7"
+  name VARCHAR(80) NOT NULL,               -- e.g. "7-day streak"
+  description VARCHAR(255) NULL,
+  icon VARCHAR(64) NULL,                   -- optional (frontend chooses icon)
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+
+-- Insert some default badges (Can be expanded later)
+INSERT INTO badges (code, name, description) VALUES
+('STREAK_3', '3-day streak', 'Log in 3 days in a row'),
+('STREAK_7', '7-day streak', 'Log in 7 days in a row'),
+('STREAK_30', '30-day streak', 'Log in 30 days in a row')
+ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description);
+
+
+CREATE TABLE IF NOT EXISTS user_badges (
+  user_id INT NOT NULL,
+  badge_id INT NOT NULL,
+  earned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, badge_id),
+  FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+  FOREIGN KEY (badge_id) REFERENCES badges(badge_id) ON DELETE CASCADE
+);
+
+
+
 CREATE TABLE IF NOT EXISTS user_profile (
   user_id INT PRIMARY KEY,
   display_name VARCHAR(80) NULL,
@@ -233,6 +262,10 @@ CREATE TABLE IF NOT EXISTS user_profile (
 
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  current_streak INT NOT NULL DEFAULT 0,
+  longest_streak INT NOT NULL DEFAULT 0,
+  last_login_date DATE NULL,
 
   CONSTRAINT fk_user_profile_user
     FOREIGN KEY (user_id) REFERENCES users(user_id)
