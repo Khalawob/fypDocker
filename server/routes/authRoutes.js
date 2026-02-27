@@ -19,7 +19,7 @@ router.post("/register", async (req, res) => {
   const { username, email, password } = req.body;
 
   if (!username || !email || !password) {
-    return res.status(400).json({ error: "All fields required" });
+    return res.status(400).json({ message: "All fields required" });
   }
 
   const hash = await bcrypt.hash(password, 10); //this hashes password
@@ -29,7 +29,7 @@ router.post("/register", async (req, res) => {
     [username, email, hash],
     (err, result) => {
       if (err) 
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ message: err.message });
 
       const newUserId = result.insertId;
 
