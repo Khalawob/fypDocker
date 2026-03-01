@@ -55,7 +55,7 @@ export default function Register() {
         return;
       }
 
-      // If your backend returns a token on register:
+      // If the backend returns a token on register:
       // localStorage.setItem("token", data.token);
 
       // If you want to go straight to login:
