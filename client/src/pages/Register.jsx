@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 
+// Use env variable for Docker, fallback to localhost for normal dev
+// works locally and in docker without code changes
+const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
+
 export default function Register() {
   const navigate = useNavigate();
 
@@ -38,7 +42,7 @@ export default function Register() {
       setLoading(true);
 
       // CHANGE THIS if  backend URL changes
-      const res = await fetch("http://localhost:5000/api/auth/register", {
+      const res = await fetch(`${API_URL}/api/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

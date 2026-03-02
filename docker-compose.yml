@@ -8,9 +8,27 @@ services:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: fyp
     volumes:
-      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - mysql_data:/var/lib/mysql #Save mysql data so it dosent vanish when container is removed
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql #file for creating database
     ports:
       - "3306:3306"
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://backend:5000
+      - CHOKIDAR_USEPOLLING=true
+      # Helps file watching on Windows/WSL/Docker Desktop
+      - WATCHPACK_POLLING=true
+    volumes:
+      - ./client:/app
+      - /app/node_modules
+    depends_on:
+      - backend
 
   backend:
     build: ./server
@@ -19,6 +37,7 @@ services:
       - "5000:5000"
     depends_on:
       - mysql
+      - nlp
     environment:
       DB_HOST: mysql
       DB_USER: root
@@ -45,3 +64,7 @@ services:
       - "8080:80"
     depends_on:
       - mysql
+
+# Define named volumes for saving MySQL data      
+volumes:
+  mysql_data:
