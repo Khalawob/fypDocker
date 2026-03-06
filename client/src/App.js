@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Register from "./pages/Register";
 import Login from "./pages/Login";
+import SetsList from "./pages/SetsList";
+import SetPage from "./pages/SetPage";
 
 function Home() {
   return (
@@ -18,6 +20,8 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/register" element={<Register />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/sets" element={<SetsList />} />
+        <Route path="/sets/:setId" element={<SetPage />} />
       </Routes>
     </BrowserRouter>
   );
