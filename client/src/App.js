@@ -3,6 +3,7 @@ import Register from "./pages/Register";
 import Login from "./pages/Login";
 import SetsList from "./pages/SetsList";
 import SetPage from "./pages/SetPage";
+import StudyPage from "./pages/StudyPage";
 
 function Home() {
   return (
@@ -22,6 +23,7 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/sets" element={<SetsList />} />
         <Route path="/sets/:setId" element={<SetPage />} />
+        <Route path="/sets/:setId/study" element={<StudyPage />} />
       </Routes>
     </BrowserRouter>
   );

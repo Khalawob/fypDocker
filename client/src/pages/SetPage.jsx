@@ -130,6 +130,12 @@ export default function SetPage() {
         ← Back
       </button>
 
+    <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+      <button type="button" onClick={() => navigate(`/sets/${setId}/study`)}>
+        Start study
+      </button>
+    </div>
+
       <h2 style={{ marginTop: 12 }}>{setInfo?.title || "Set"}</h2>
       <div style={{ opacity: 0.8 }}>
         {setInfo?.description || "No description"}
