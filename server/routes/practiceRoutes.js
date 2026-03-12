@@ -838,7 +838,7 @@ if (String(session.difficulty_mode) === "EASY") {
 
   // -------- PREVIEW: show full answer, then flip to TEST --------
   if (phase === "PREVIEW") {
-    let revealSeconds = 15;
+    let revealSeconds = Number(session.display_time_per_card || 15);
     let timingDebug = null;
 
     if (settings.use_adaptive_preview_timing) {
@@ -1030,7 +1030,7 @@ if (String(session.difficulty_mode) === "MODERATE") {
     );
 
     // Decide answer reveal seconds (calibration affects answer reveal)
-    let revealSeconds = 15;
+    let revealSeconds = Number(session.display_time_per_card || 15);
     let timingDebug = null;
 
     if (settings.use_adaptive_preview_timing) {
