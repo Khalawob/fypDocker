@@ -3,6 +3,14 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
+const DEFAULT_THEME = {
+  top_color: "#121a2a",
+  bottom_color: "#0b1220",
+  text_color: "#ffffff",
+  accent_color: "#3b82f6",
+  border_radius: "12px",
+};
+
 export default function SetDetails() {
   const { setId } = useParams();
   const navigate = useNavigate();
@@ -125,6 +133,59 @@ export default function SetDetails() {
     navigate(`/practice?set_id=${setId}`);
   }
 
+  const theme = {
+    top_color: setInfo?.top_color || DEFAULT_THEME.top_color,
+    bottom_color: setInfo?.bottom_color || DEFAULT_THEME.bottom_color,
+    text_color: setInfo?.text_color || DEFAULT_THEME.text_color,
+    accent_color: setInfo?.accent_color || DEFAULT_THEME.accent_color,
+    border_radius: setInfo?.border_radius || DEFAULT_THEME.border_radius,
+  };
+
+  const cardWrapperStyle = {
+    ...styles.cardWrapper,
+    borderRadius: theme.border_radius,
+    border: `2px solid ${theme.accent_color}`,
+  };
+
+  const topHalfStyle = {
+    ...styles.topHalf,
+    background: theme.top_color,
+    color: theme.text_color,
+  };
+
+  const bottomHalfStyle = {
+    ...styles.bottomHalf,
+    background: theme.bottom_color,
+    color: theme.text_color,
+    borderTop: `1px solid ${theme.accent_color}`,
+  };
+
+  const labelStyle = {
+    ...styles.label,
+    color: theme.accent_color,
+    opacity: 1,
+  };
+
+  const metaStyle = {
+    ...styles.cardMeta,
+    color: theme.text_color,
+    opacity: 0.75,
+  };
+
+  const practiceButtonStyle = {
+  ...styles.primaryButton,
+  backgroundColor: "#22c55e",
+  color: "#ffffff",
+  border: "none",
+};
+
+  const addFlashcardButtonStyle = {
+    ...styles.primaryButtonLink,
+    backgroundColor: "#22c55e",
+    color: "#ffffff",
+    border: "none",
+  };
+
   return (
     <div style={styles.page}>
       <div style={styles.container}>
@@ -147,12 +208,11 @@ export default function SetDetails() {
               Edit Set
             </Link>
 
-
-            <Link to={`/sets/${setId}/add-flashcard`} style={styles.primaryButtonLink}>
+            <Link to={`/sets/${setId}/add-flashcard`} style={addFlashcardButtonStyle}>
               Add Flashcard
             </Link>
 
-            <button style={styles.primaryButton} onClick={startPractice}>
+            <button style={practiceButtonStyle} onClick={startPractice}>
               Practice Set
             </button>
 
@@ -162,54 +222,62 @@ export default function SetDetails() {
           </div>
         </div>
 
-        {loading && <div style={styles.card}>Loading set...</div>}
+        {loading && <div style={styles.cardShell}>Loading set...</div>}
         {error && <div style={styles.error}>{error}</div>}
         {success && <div style={styles.success}>{success}</div>}
 
         {!loading && !error && flashcards.length === 0 && (
-          <div style={styles.card}>
-            <h3>No flashcards yet</h3>
-            <p style={styles.emptyText}>
-              Add your first flashcard to start building this set.
-            </p>
-            <Link to={`/sets/${setId}/add-flashcard`} style={styles.primaryButtonLink}>
-              Add First Flashcard
-            </Link>
+          <div style={cardWrapperStyle}>
+            <div style={topHalfStyle}>
+              <h3>No flashcards yet</h3>
+              <p style={styles.emptyText}>
+                Add your first flashcard to start building this set.
+              </p>
+            </div>
+            <div style={bottomHalfStyle}>
+              <Link to={`/sets/${setId}/add-flashcard`} style={addFlashcardButtonStyle}>
+                Add First Flashcard
+              </Link>
+            </div>
           </div>
         )}
 
         {!loading && !error && flashcards.length > 0 && (
           <div style={styles.list}>
             {flashcards.map((card) => (
-              <div key={card.flashcard_id} style={styles.card}>
-                <div style={styles.cardMeta}>
-                  Flashcard ID: {card.flashcard_id}
+              <div key={card.flashcard_id} style={cardWrapperStyle}>
+                <div style={topHalfStyle}>
+                  <div style={metaStyle}>
+                    Flashcard ID: {card.flashcard_id}
+                  </div>
+
+                  <div style={styles.block}>
+                    <div style={labelStyle}>Question</div>
+                    <div style={styles.text}>{card.question}</div>
+                  </div>
                 </div>
 
-                <div style={styles.block}>
-                  <div style={styles.label}>Question</div>
-                  <div style={styles.text}>{card.question}</div>
-                </div>
+                <div style={bottomHalfStyle}>
+                  <div style={styles.block}>
+                    <div style={labelStyle}>Answer</div>
+                    <div style={styles.text}>{card.answer}</div>
+                  </div>
 
-                <div style={styles.block}>
-                  <div style={styles.label}>Answer</div>
-                  <div style={styles.text}>{card.answer}</div>
-                </div>
+                  <div style={styles.flashcardActions}>
+                    <Link
+                      to={`/sets/${setId}/flashcards/${card.flashcard_id}/edit`}
+                      style={styles.editButton}
+                    >
+                      Edit Flashcard
+                    </Link>
 
-                <div style={styles.flashcardActions}>
-                  <Link
-                    to={`/sets/${setId}/flashcards/${card.flashcard_id}/edit`}
-                    style={styles.editButton}
-                  >
-                    Edit Flashcard
-                  </Link>
-
-                  <button
-                    style={styles.deleteButton}
-                    onClick={() => deleteFlashcard(card.flashcard_id)}
-                  >
-                    Delete Flashcard
-                  </button>
+                    <button
+                      style={styles.deleteButton}
+                      onClick={() => deleteFlashcard(card.flashcard_id)}
+                    >
+                      Delete Flashcard
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -256,11 +324,21 @@ const styles = {
     display: "grid",
     gap: 16,
   },
-  card: {
+  cardShell: {
     background: "#121a2a",
     padding: 20,
     borderRadius: 12,
     boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+  },
+  cardWrapper: {
+    overflow: "hidden",
+    boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+  },
+  topHalf: {
+    padding: 20,
+  },
+  bottomHalf: {
+    padding: 20,
   },
   cardMeta: {
     fontSize: 13,

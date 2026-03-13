@@ -42,6 +42,14 @@ const PROMPT_TYPES = {
   },
 };
 
+const DEFAULT_THEME = {
+  top_color: "#121a2a",
+  bottom_color: "#0b1220",
+  text_color: "#ffffff",
+  accent_color: "#3b82f6",
+  border_radius: "12px",
+};
+
 export default function Practice() {
   const [searchParams] = useSearchParams();
 
@@ -73,10 +81,14 @@ export default function Practice() {
   const [summary, setSummary] = useState(null);
   const [timerSeconds, setTimerSeconds] = useState(null);
   const [timerMaxSeconds, setTimerMaxSeconds] = useState(null);
+  const [isFlipping, setIsFlipping] = useState(false);
+  const [flipDirection, setFlipDirection] = useState("forward");
 
   const token = localStorage.getItem("token");
   const autoActionLockRef = useRef(false);
   const answerStartTimeRef = useRef(null);
+  const previousPhaseRef = useRef(null);
+  const flipTimeoutRef = useRef(null);
 
   function onChange(e) {
     const { name, value, type, checked } = e.target;
@@ -148,6 +160,8 @@ export default function Practice() {
     setTimerMaxSeconds(null);
     answerStartTimeRef.current = null;
     autoActionLockRef.current = false;
+    previousPhaseRef.current = null;
+    setIsFlipping(false);
 
     if (!form.set_id) {
       setError("Please select a flashcard set.");
@@ -325,6 +339,8 @@ export default function Practice() {
     setTimerMaxSeconds(null);
     answerStartTimeRef.current = null;
     autoActionLockRef.current = false;
+    previousPhaseRef.current = null;
+    setIsFlipping(false);
   }
 
   function continueAfterFeedback() {
@@ -347,6 +363,20 @@ export default function Practice() {
     if (currentCard.answer_time_limit) return "Answer time remaining";
     return "Time remaining";
   }, [currentCard]);
+
+  const selectedSetTheme = useMemo(() => {
+    const selectedSet = availableSets.find(
+      (set) => String(set.set_id) === String(form.set_id)
+    );
+
+    return {
+      top_color: selectedSet?.top_color || DEFAULT_THEME.top_color,
+      bottom_color: selectedSet?.bottom_color || DEFAULT_THEME.bottom_color,
+      text_color: selectedSet?.text_color || DEFAULT_THEME.text_color,
+      accent_color: selectedSet?.accent_color || DEFAULT_THEME.accent_color,
+      border_radius: selectedSet?.border_radius || DEFAULT_THEME.border_radius,
+    };
+  }, [availableSets, form.set_id]);
 
   function getTimerColor() {
     if (timerSeconds === null || !timerMaxSeconds) return "#22c55e";
@@ -421,6 +451,33 @@ export default function Practice() {
     };
   }, [sessionId, finished]);
 
+  useEffect(() => {
+    if (!currentCard?.phase) return;
+
+    const previousPhase = previousPhaseRef.current;
+
+    if (previousPhase && previousPhase !== currentCard.phase) {
+      setFlipDirection(currentCard.phase === "TEST" ? "forward" : "backward");
+      setIsFlipping(true);
+
+      if (flipTimeoutRef.current) {
+        clearTimeout(flipTimeoutRef.current);
+      }
+
+      flipTimeoutRef.current = setTimeout(() => {
+        setIsFlipping(false);
+      }, 550);
+    }
+
+    previousPhaseRef.current = currentCard.phase;
+
+    return () => {
+      if (flipTimeoutRef.current) {
+        clearTimeout(flipTimeoutRef.current);
+      }
+    };
+  }, [currentCard?.phase]);
+
   function renderProgress() {
     if (!currentCard) return null;
 
@@ -435,7 +492,13 @@ export default function Practice() {
             Card {currentCard.progress.current} of {currentCard.progress.total}
           </div>
           <div style={styles.progressBarOuter}>
-            <div style={{ ...styles.progressBarInner, width: `${value}%` }} />
+            <div
+              style={{
+                ...styles.progressBarInner,
+                width: `${value}%`,
+                background: selectedSetTheme.accent_color,
+              }}
+            />
           </div>
         </div>
       );
@@ -452,7 +515,13 @@ export default function Practice() {
             Group card {currentCard.progress.in_group} of {currentCard.progress.group_total}
           </div>
           <div style={styles.progressBarOuter}>
-            <div style={{ ...styles.progressBarInner, width: `${value}%` }} />
+            <div
+              style={{
+                ...styles.progressBarInner,
+                width: `${value}%`,
+                background: selectedSetTheme.accent_color,
+              }}
+            />
           </div>
         </div>
       );
@@ -472,7 +541,13 @@ export default function Practice() {
             Test card {currentCard.progress.answered_in_group} of {currentCard.progress.group_total}
           </div>
           <div style={styles.progressBarOuter}>
-            <div style={{ ...styles.progressBarInner, width: `${value}%` }} />
+            <div
+              style={{
+                ...styles.progressBarInner,
+                width: `${value}%`,
+                background: selectedSetTheme.accent_color,
+              }}
+            />
           </div>
         </div>
       );
@@ -489,7 +564,13 @@ export default function Practice() {
             Preview {currentCard.progress.index} of {currentCard.progress.total}
           </div>
           <div style={styles.progressBarOuter}>
-            <div style={{ ...styles.progressBarInner, width: `${value}%` }} />
+            <div
+              style={{
+                ...styles.progressBarInner,
+                width: `${value}%`,
+                background: selectedSetTheme.accent_color,
+              }}
+            />
           </div>
         </div>
       );
@@ -508,7 +589,13 @@ export default function Practice() {
             Completed {completed} of {currentCard.progress.total}
           </div>
           <div style={styles.progressBarOuter}>
-            <div style={{ ...styles.progressBarInner, width: `${value}%` }} />
+            <div
+              style={{
+                ...styles.progressBarInner,
+                width: `${value}%`,
+                background: selectedSetTheme.accent_color,
+              }}
+            />
           </div>
         </div>
       );
@@ -516,6 +603,98 @@ export default function Practice() {
 
     return null;
   }
+
+  const flashcardPerspectiveStyle = {
+    ...styles.flashcardPerspective,
+    perspective: "1800px",
+  };
+
+  const flashcardShellStyle = {
+    ...styles.flashcardShell,
+    borderRadius: selectedSetTheme.border_radius,
+    border: `2px solid ${selectedSetTheme.accent_color}`,
+    transform: isFlipping
+      ? `rotateY(${flipDirection === "forward" ? "180deg" : "-180deg"}) scale(0.985)`
+      : "rotateY(0deg) scale(1)",
+    boxShadow: isFlipping
+      ? `0 22px 50px rgba(0,0,0,0.38), 0 0 0 2px ${selectedSetTheme.accent_color}33`
+      : "0 16px 40px rgba(0,0,0,0.32)",
+    filter: isFlipping ? "brightness(1.06)" : "brightness(1)",
+  };
+
+  const flashcardTopStyle = {
+    ...styles.flashcardTop,
+    background: selectedSetTheme.top_color,
+    color: selectedSetTheme.text_color,
+  };
+
+  const flashcardBottomStyle = {
+    ...styles.flashcardBottom,
+    background: selectedSetTheme.bottom_color,
+    color: selectedSetTheme.text_color,
+    borderTop: `1px solid ${selectedSetTheme.accent_color}`,
+  };
+
+  const themedButtonStyle = {
+    ...styles.button,
+    backgroundColor: "#3b82f6",
+    color: "#ffffff",
+    border: "none",
+    opacity: 1,
+    filter: "none",
+    WebkitTextFillColor: "#ffffff",
+  };
+
+  const themedDisabledButtonStyle = {
+    ...styles.button,
+    backgroundColor: "#3b82f6",
+    color: "#ffffff",
+    border: "none",
+    opacity: 0.65,
+    cursor: "not-allowed",
+    filter: "grayscale(0.15)",
+    WebkitTextFillColor: "#ffffff",
+  };
+
+  const themedStartButtonStyle = {
+    ...styles.startButton,
+    backgroundColor: "#22c55e",
+    color: "#ffffff",
+    border: "none",
+    boxShadow: "none",
+    opacity: 1,
+    filter: "none",
+    WebkitTextFillColor: "#ffffff",
+  };
+
+  const themedDisabledStartButtonStyle = {
+    ...styles.startButton,
+    backgroundColor: "#22c55e",
+    color: "#ffffff",
+    border: "none",
+    boxShadow: "none",
+    opacity: 0.65,
+    cursor: "not-allowed",
+    filter: "grayscale(0.15)",
+    WebkitTextFillColor: "#ffffff",
+  };
+
+  const themedLabelStyle = {
+    ...styles.label,
+    color: selectedSetTheme.text_color,
+  };
+
+  const themedAnswerLabelStyle = {
+    ...styles.answerLabel,
+    color: selectedSetTheme.accent_color,
+    opacity: 1,
+  };
+
+  const themedQuestionLabelStyle = {
+    ...styles.questionLabel,
+    color: selectedSetTheme.accent_color,
+    opacity: 1,
+  };
 
   return (
     <div style={styles.page}>
@@ -718,7 +897,11 @@ export default function Practice() {
               </div>
             )}
 
-            <button style={styles.startButton} disabled={loading || setsLoading}>
+            <button
+              type="submit"
+              style={loading || setsLoading ? themedDisabledStartButtonStyle : themedStartButtonStyle}
+              disabled={loading || setsLoading}
+            >
               {loading ? "Starting..." : "Start Practice Session"}
             </button>
           </form>
@@ -728,170 +911,206 @@ export default function Practice() {
         {timeoutMessage && <div style={styles.timeoutMessage}>{timeoutMessage}</div>}
 
         {sessionId && !finished && currentCard && (
-          <div style={styles.card}>
-            <div style={styles.badgeRow}>
-              <span style={styles.badge}>{currentCard.difficulty_mode}</span>
-              <span
-                style={{
-                  ...styles.badge,
-                  background: isPreview ? "#14532d" : "#1e3a8a",
-                }}
-              >
-                {currentCard.phase}
-              </span>
-              {currentCard.group?.index && (
-                <span style={styles.badge}>Group {currentCard.group.index}</span>
+          <div style={styles.practiceSessionArea}>
+            <div style={styles.infoPanel}>
+              <div style={styles.badgeRow}>
+                <span style={styles.badge}>{currentCard.difficulty_mode}</span>
+                <span
+                  style={{
+                    ...styles.badge,
+                    background: isPreview ? "#14532d" : "#1e3a8a",
+                  }}
+                >
+                  {currentCard.phase}
+                </span>
+                {currentCard.group?.index && (
+                  <span style={styles.badge}>Group {currentCard.group.index}</span>
+                )}
+              </div>
+
+              {renderProgress()}
+
+              {timerSeconds !== null && (
+                <div
+                  style={{
+                    ...styles.timerCard,
+                    borderRadius: selectedSetTheme.border_radius,
+                    border: `1px solid ${selectedSetTheme.accent_color}`,
+                  }}
+                >
+                  <div style={styles.timerLabel}>{timerLabel}</div>
+
+                  <div
+                    style={{
+                      ...styles.timerValue,
+                      color: getTimerColor(),
+                    }}
+                  >
+                    {timerSeconds}s
+                  </div>
+
+                  <div style={styles.timerProgressOuter}>
+                    <div
+                      style={{
+                        ...styles.timerProgressInner,
+                        width: `${getTimerProgressPercent()}%`,
+                        background: getTimerColor(),
+                      }}
+                    />
+                  </div>
+                </div>
               )}
             </div>
 
-            {renderProgress()}
-
-            {timerSeconds !== null && (
-              <div style={styles.timerCard}>
-                <div style={styles.timerLabel}>{timerLabel}</div>
-
-                <div
-                  style={{
-                    ...styles.timerValue,
-                    color: getTimerColor(),
-                  }}
-                >
-                  {timerSeconds}s
+            <div style={flashcardPerspectiveStyle}>
+              <div style={flashcardShellStyle}>
+                <div style={flashcardTopStyle}>
+                  <div style={themedQuestionLabelStyle}>Question</div>
+                  <div style={styles.flashcardContentTop}>
+                    <h2 style={styles.question}>{currentCard.question}</h2>
+                  </div>
                 </div>
 
-                <div style={styles.timerProgressOuter}>
-                  <div
-                    style={{
-                      ...styles.timerProgressInner,
-                      width: `${getTimerProgressPercent()}%`,
-                      background: getTimerColor(),
-                    }}
-                  />
+                <div style={flashcardBottomStyle}>
+                  <div style={styles.flashcardContentBottom}>
+                    {isPreview && currentCard.answer && (
+                      <div style={styles.bottomSectionBlock}>
+                        <div style={themedAnswerLabelStyle}>Full Answer</div>
+                        <div
+                          style={styles.noCopyAnswer}
+                          onCopy={(e) => e.preventDefault()}
+                          onCut={(e) => e.preventDefault()}
+                          onContextMenu={(e) => e.preventDefault()}
+                          onDragStart={(e) => e.preventDefault()}
+                        >
+                          {currentCard.answer}
+                        </div>
+                        <div style={styles.autoHint}>
+                          This card will continue automatically when the timer ends.
+                        </div>
+                      </div>
+                    )}
+
+                    {isTest && currentCard.blanked_text && (
+                      <div style={styles.bottomSectionBlock}>
+                        <div style={themedAnswerLabelStyle}>Fill in the blanks</div>
+                        <div
+                          style={styles.noCopyText}
+                          onCopy={(e) => e.preventDefault()}
+                          onCut={(e) => e.preventDefault()}
+                          onContextMenu={(e) => e.preventDefault()}
+                          onDragStart={(e) => e.preventDefault()}
+                        >
+                          {currentCard.blanked_text}
+                        </div>
+
+                        {currentCard.first_letter_clues && (
+                          <>
+                            <div style={themedAnswerLabelStyle}>Clues</div>
+                            <div
+                              style={styles.noCopyText}
+                              onCopy={(e) => e.preventDefault()}
+                              onCut={(e) => e.preventDefault()}
+                              onContextMenu={(e) => e.preventDefault()}
+                              onDragStart={(e) => e.preventDefault()}
+                            >
+                              {currentCard.first_letter_clues}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {showAnswerBox && (
+                      <form onSubmit={submitAnswer}>
+                        <label style={themedLabelStyle}>Your Answer</label>
+                        <textarea
+                          value={userAnswer}
+                          onChange={(e) => {
+                            setUserAnswer(e.target.value);
+                            if (inlineMessage) setInlineMessage("");
+                          }}
+                          style={styles.textarea}
+                          placeholder="Type your answer here..."
+                        />
+
+                        {inlineMessage && (
+                          <div style={styles.inlineWarning}>{inlineMessage}</div>
+                        )}
+
+                        <div style={styles.autoHint}>
+                          If time reaches 0, your current answer will be submitted automatically.
+                        </div>
+
+                        <div style={styles.actionRow}>
+                          <button
+                            type="submit"
+                            style={loading ? themedDisabledButtonStyle : themedButtonStyle}
+                            disabled={loading}
+                          >
+                            {loading ? "Submitting..." : "Submit Answer"}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+
+                    {!showAnswerBox && isTest && !currentCard.blanked_text && (
+                      <form onSubmit={submitAnswer}>
+                        <label style={themedLabelStyle}>Your Answer</label>
+                        <textarea
+                          value={userAnswer}
+                          onChange={(e) => {
+                            setUserAnswer(e.target.value);
+                            if (inlineMessage) setInlineMessage("");
+                          }}
+                          style={styles.textarea}
+                          placeholder="Type your answer here..."
+                        />
+
+                        {inlineMessage && (
+                          <div style={styles.inlineWarning}>{inlineMessage}</div>
+                        )}
+
+                        <div style={styles.autoHint}>
+                          If time reaches 0, your current answer will be submitted automatically.
+                        </div>
+
+                        <div style={styles.actionRow}>
+                          <button
+                            type="submit"
+                            style={loading ? themedDisabledButtonStyle : themedButtonStyle}
+                            disabled={loading}
+                          >
+                            {loading ? "Submitting..." : "Submit Answer"}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
                 </div>
               </div>
-            )}
-
-            <div style={styles.questionCard}>
-              <div style={styles.questionLabel}>Question</div>
-              <h2 style={styles.question}>{currentCard.question}</h2>
             </div>
 
-            {isPreview && currentCard.answer && (
-              <div style={styles.previewCard}>
-                <div style={styles.answerLabel}>Full Answer</div>
-                <div
-                  style={styles.noCopyAnswer}
-                  onCopy={(e) => e.preventDefault()}
-                  onCut={(e) => e.preventDefault()}
-                  onContextMenu={(e) => e.preventDefault()}
-                  onDragStart={(e) => e.preventDefault()}
-                >
-                  {currentCard.answer}
-                </div>
-                <div style={styles.autoHint}>
-                  This card will continue automatically when the timer ends.
-                </div>
-
+            <div style={styles.actionRow}>
+              {isPreview && currentCard.answer && (
                 <button
-                  style={styles.button}
+                  type="button"
+                  style={loading ? themedDisabledButtonStyle : themedButtonStyle}
                   onClick={() => loadNextCard()}
                   disabled={loading}
                 >
                   {loading ? "Loading..." : "Continue Now"}
                 </button>
-              </div>
-            )}
-
-            {isTest && currentCard.blanked_text && (
-              <div style={styles.previewCard}>
-                <div style={styles.answerLabel}>Fill in the blanks</div>
-                <div
-                  style={styles.noCopyText}
-                  onCopy={(e) => e.preventDefault()}
-                  onCut={(e) => e.preventDefault()}
-                  onContextMenu={(e) => e.preventDefault()}
-                  onDragStart={(e) => e.preventDefault()}
-                >
-                  {currentCard.blanked_text}
-                </div>
-
-                {currentCard.first_letter_clues && (
-                  <>
-                    <div style={styles.answerLabel}>Clues</div>
-                    <div
-                      style={styles.noCopyText}
-                      onCopy={(e) => e.preventDefault()}
-                      onCut={(e) => e.preventDefault()}
-                      onContextMenu={(e) => e.preventDefault()}
-                      onDragStart={(e) => e.preventDefault()}
-                    >
-                      {currentCard.first_letter_clues}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {showAnswerBox && (
-              <form onSubmit={submitAnswer}>
-                <label style={styles.label}>Your Answer</label>
-                <textarea
-                  value={userAnswer}
-                  onChange={(e) => {
-                    setUserAnswer(e.target.value);
-                    if (inlineMessage) setInlineMessage("");
-                  }}
-                  style={styles.textarea}
-                  placeholder="Type your answer here..."
-                />
-
-                {inlineMessage && (
-                  <div style={styles.inlineWarning}>{inlineMessage}</div>
-                )}
-
-                <div style={styles.autoHint}>
-                  If time reaches 0, your current answer will be submitted automatically.
-                </div>
-
-                <button style={styles.button} disabled={loading}>
-                  {loading ? "Submitting..." : "Submit Answer"}
-                </button>
-              </form>
-            )}
-
-            {!showAnswerBox && isTest && !currentCard.blanked_text && (
-              <form onSubmit={submitAnswer}>
-                <label style={styles.label}>Your Answer</label>
-                <textarea
-                  value={userAnswer}
-                  onChange={(e) => {
-                    setUserAnswer(e.target.value);
-                    if (inlineMessage) setInlineMessage("");
-                  }}
-                  style={styles.textarea}
-                  placeholder="Type your answer here..."
-                />
-
-                {inlineMessage && (
-                  <div style={styles.inlineWarning}>{inlineMessage}</div>
-                )}
-
-                <div style={styles.autoHint}>
-                  If time reaches 0, your current answer will be submitted automatically.
-                </div>
-
-                <button style={styles.button} disabled={loading}>
-                  {loading ? "Submitting..." : "Submit Answer"}
-                </button>
-              </form>
-            )}
+              )}
+            </div>
           </div>
         )}
 
         {feedback && !finished && (
           <div
             style={{
-              ...styles.card,
+              ...styles.resultPanel,
+              borderRadius: selectedSetTheme.border_radius,
               border: feedback.is_correct
                 ? "1px solid rgba(34,197,94,0.45)"
                 : "1px solid rgba(239,68,68,0.45)",
@@ -906,8 +1125,16 @@ export default function Practice() {
               {feedback.is_correct ? "Correct" : "Incorrect"}
             </div>
 
-            <div style={styles.feedbackBlock}>
-              <div style={styles.answerLabel}>Correct Answer</div>
+            <div
+              style={{
+                ...styles.feedbackBlock,
+                borderRadius: selectedSetTheme.border_radius,
+                border: `1px solid ${selectedSetTheme.accent_color}`,
+              }}
+            >
+              <div style={{ ...styles.answerLabel, color: selectedSetTheme.accent_color, opacity: 1 }}>
+                Correct Answer
+              </div>
               <div
                 style={styles.noCopyAnswer}
                 onCopy={(e) => e.preventDefault()}
@@ -923,45 +1150,93 @@ export default function Practice() {
               Attempt Number: {feedback.attempt_number}
             </div>
 
-            <button style={styles.button} onClick={continueAfterFeedback}>
-              Next Card
-            </button>
+            <div style={styles.actionRow}>
+              <button
+                type="button"
+                style={themedButtonStyle}
+                onClick={continueAfterFeedback}
+              >
+                Next Card
+              </button>
+            </div>
           </div>
         )}
 
         {finished && (
-          <div style={styles.card}>
+          <div
+            style={{
+              ...styles.resultPanel,
+              borderRadius: selectedSetTheme.border_radius,
+              border: `2px solid ${selectedSetTheme.accent_color}`,
+            }}
+          >
             <h2 style={styles.sectionTitle}>Session Finished</h2>
 
             {summary ? (
               <>
                 <div style={styles.summaryGrid}>
-                  <div style={styles.summaryCard}>
+                  <div
+                    style={{
+                      ...styles.summaryCard,
+                      borderRadius: selectedSetTheme.border_radius,
+                      border: `1px solid ${selectedSetTheme.accent_color}`,
+                    }}
+                  >
                     <div style={styles.summaryLabel}>Mode</div>
                     <div style={styles.summaryValue}>{summary.mode}</div>
                   </div>
 
-                  <div style={styles.summaryCard}>
+                  <div
+                    style={{
+                      ...styles.summaryCard,
+                      borderRadius: selectedSetTheme.border_radius,
+                      border: `1px solid ${selectedSetTheme.accent_color}`,
+                    }}
+                  >
                     <div style={styles.summaryLabel}>Final Score</div>
                     <div style={styles.summaryValue}>{summary.final_score}</div>
                   </div>
 
-                  <div style={styles.summaryCard}>
+                  <div
+                    style={{
+                      ...styles.summaryCard,
+                      borderRadius: selectedSetTheme.border_radius,
+                      border: `1px solid ${selectedSetTheme.accent_color}`,
+                    }}
+                  >
                     <div style={styles.summaryLabel}>Correct</div>
                     <div style={styles.summaryValue}>{summary.total_correct}</div>
                   </div>
 
-                  <div style={styles.summaryCard}>
+                  <div
+                    style={{
+                      ...styles.summaryCard,
+                      borderRadius: selectedSetTheme.border_radius,
+                      border: `1px solid ${selectedSetTheme.accent_color}`,
+                    }}
+                  >
                     <div style={styles.summaryLabel}>Incorrect</div>
                     <div style={styles.summaryValue}>{summary.total_incorrect}</div>
                   </div>
 
-                  <div style={styles.summaryCard}>
+                  <div
+                    style={{
+                      ...styles.summaryCard,
+                      borderRadius: selectedSetTheme.border_radius,
+                      border: `1px solid ${selectedSetTheme.accent_color}`,
+                    }}
+                  >
                     <div style={styles.summaryLabel}>Attempts</div>
                     <div style={styles.summaryValue}>{summary.total_attempts}</div>
                   </div>
 
-                  <div style={styles.summaryCard}>
+                  <div
+                    style={{
+                      ...styles.summaryCard,
+                      borderRadius: selectedSetTheme.border_radius,
+                      border: `1px solid ${selectedSetTheme.accent_color}`,
+                    }}
+                  >
                     <div style={styles.summaryLabel}>Accuracy</div>
                     <div style={styles.summaryValue}>
                       {Math.round((summary.accuracy || 0) * 100)}%
@@ -974,7 +1249,14 @@ export default function Practice() {
                     <h3 style={{ marginBottom: 12 }}>Hardest Cards</h3>
                     <div style={styles.hardestList}>
                       {summary.top_hardest_cards.map((card) => (
-                        <div key={card.flashcard_id} style={styles.hardestCard}>
+                        <div
+                          key={card.flashcard_id}
+                          style={{
+                            ...styles.hardestCard,
+                            borderRadius: selectedSetTheme.border_radius,
+                            border: `1px solid ${selectedSetTheme.accent_color}`,
+                          }}
+                        >
                           <div style={styles.hardestQuestion}>
                             {card.question || `Flashcard ${card.flashcard_id}`}
                           </div>
@@ -991,9 +1273,15 @@ export default function Practice() {
               <p>No summary returned.</p>
             )}
 
-            <button style={styles.button} onClick={resetPractice}>
-              Start Another Session
-            </button>
+            <div style={styles.actionRow}>
+              <button
+                type="button"
+                style={themedButtonStyle}
+                onClick={resetPractice}
+              >
+                Start Another Session
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -1009,7 +1297,7 @@ const styles = {
     padding: 24,
   },
   container: {
-    maxWidth: 950,
+    maxWidth: 980,
     margin: "0 auto",
   },
   headerRow: {
@@ -1050,6 +1338,73 @@ const styles = {
     marginBottom: 20,
     boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
   },
+  practiceSessionArea: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 18,
+    marginBottom: 20,
+  },
+  infoPanel: {
+    background: "#121a2a",
+    padding: 20,
+    borderRadius: 14,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+  },
+  flashcardPerspective: {
+    width: "100%",
+    display: "flex",
+    justifyContent: "center",
+  },
+  flashcardShell: {
+    overflow: "hidden",
+    maxWidth: 760,
+    width: "100%",
+    margin: "0 auto",
+    minHeight: 420,
+    display: "flex",
+    flexDirection: "column",
+    transformStyle: "preserve-3d",
+    transition:
+      "transform 0.55s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.55s ease, filter 0.55s ease",
+    willChange: "transform",
+    backfaceVisibility: "hidden",
+  },
+  flashcardTop: {
+    padding: 28,
+    minHeight: 180,
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+  },
+  flashcardBottom: {
+    padding: 28,
+    minHeight: 240,
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+  },
+  flashcardContentTop: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flex: 1,
+    textAlign: "center",
+  },
+  flashcardContentBottom: {
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    flex: 1,
+  },
+  resultPanel: {
+    background: "#121a2a",
+    padding: 28,
+    marginBottom: 20,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+  },
+  bottomSectionBlock: {
+    marginBottom: 18,
+  },
   advancedSection: {
     marginTop: 18,
     paddingTop: 18,
@@ -1080,10 +1435,11 @@ const styles = {
     background: "#0b1220",
     color: "white",
     marginBottom: 4,
+    boxSizing: "border-box",
   },
   textarea: {
     width: "100%",
-    minHeight: 120,
+    minHeight: 140,
     padding: 12,
     borderRadius: 8,
     border: "1px solid #2b3550",
@@ -1091,6 +1447,7 @@ const styles = {
     color: "white",
     marginBottom: 12,
     resize: "vertical",
+    boxSizing: "border-box",
   },
   button: {
     padding: "12px 16px",
@@ -1101,6 +1458,11 @@ const styles = {
     fontWeight: 700,
     cursor: "pointer",
     marginTop: 8,
+    appearance: "none",
+    WebkitAppearance: "none",
+    MozAppearance: "none",
+    opacity: 1,
+    outline: "none",
   },
   startButton: {
     display: "block",
@@ -1116,6 +1478,11 @@ const styles = {
     fontSize: 18,
     cursor: "pointer",
     boxShadow: "0 8px 20px rgba(34,197,94,0.25)",
+    appearance: "none",
+    WebkitAppearance: "none",
+    MozAppearance: "none",
+    opacity: 1,
+    outline: "none",
   },
   advancedToggle: {
     marginTop: 18,
@@ -1204,7 +1571,7 @@ const styles = {
     border: "1px solid #23304c",
     borderRadius: 12,
     padding: 16,
-    marginBottom: 18,
+    marginBottom: 0,
     textAlign: "center",
   },
   timerLabel: {
@@ -1231,30 +1598,18 @@ const styles = {
     borderRadius: 999,
     transition: "width 1s linear, background 0.4s ease",
   },
-  questionCard: {
-    background: "#09101d",
-    border: "1px solid #23304c",
-    padding: 18,
-    borderRadius: 12,
-    marginBottom: 18,
-  },
   questionLabel: {
     fontSize: 13,
     textTransform: "uppercase",
     letterSpacing: 1,
     opacity: 0.8,
-    marginBottom: 8,
+    marginBottom: 12,
+    textAlign: "center",
   },
   question: {
     margin: 0,
-    lineHeight: 1.4,
-  },
-  previewCard: {
-    background: "#0b1220",
-    border: "1px solid #23304c",
-    padding: 18,
-    borderRadius: 12,
-    marginBottom: 18,
+    lineHeight: 1.5,
+    fontSize: 28,
   },
   answerLabel: {
     fontSize: 13,
@@ -1264,39 +1619,23 @@ const styles = {
     marginBottom: 8,
     marginTop: 8,
   },
-  answerText: {
-    lineHeight: 1.6,
-    fontSize: 16,
-  },
   noCopyAnswer: {
-    lineHeight: 1.6,
-    fontSize: 16,
+    lineHeight: 1.7,
+    fontSize: 18,
     userSelect: "none",
     WebkitUserSelect: "none",
     MozUserSelect: "none",
     msUserSelect: "none",
   },
   noCopyText: {
-    lineHeight: 1.8,
-    fontSize: 18,
+    lineHeight: 1.9,
+    fontSize: 20,
     fontWeight: 600,
     whiteSpace: "pre-wrap",
     userSelect: "none",
     WebkitUserSelect: "none",
     MozUserSelect: "none",
     msUserSelect: "none",
-  },
-  blankedText: {
-    lineHeight: 1.8,
-    fontSize: 18,
-    fontWeight: 600,
-    whiteSpace: "pre-wrap",
-  },
-  cluesText: {
-    lineHeight: 1.8,
-    fontSize: 15,
-    opacity: 0.95,
-    whiteSpace: "pre-wrap",
   },
   autoHint: {
     marginTop: 12,
@@ -1312,7 +1651,6 @@ const styles = {
     background: "#0b1220",
     border: "1px solid #23304c",
     padding: 16,
-    borderRadius: 12,
     marginBottom: 16,
   },
   feedbackMeta: {
@@ -1327,7 +1665,6 @@ const styles = {
   summaryCard: {
     background: "#09101d",
     border: "1px solid #23304c",
-    borderRadius: 12,
     padding: 16,
   },
   summaryLabel: {
@@ -1348,7 +1685,6 @@ const styles = {
   hardestCard: {
     background: "#09101d",
     border: "1px solid #23304c",
-    borderRadius: 12,
     padding: 16,
   },
   hardestQuestion: {
@@ -1357,5 +1693,11 @@ const styles = {
   },
   hardestRating: {
     opacity: 0.9,
+  },
+  actionRow: {
+    display: "flex",
+    justifyContent: "center",
+    gap: 12,
+    flexWrap: "wrap",
   },
 };

@@ -3,6 +3,14 @@ import { Link, useNavigate } from "react-router-dom";
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
+const DEFAULT_THEME = {
+  top_color: "#121a2a",
+  bottom_color: "#0b1220",
+  text_color: "#ffffff",
+  accent_color: "#3b82f6",
+  border_radius: "12px",
+};
+
 export default function Sets() {
   const navigate = useNavigate();
   const [sets, setSets] = useState([]);
@@ -13,6 +21,7 @@ export default function Sets() {
 
   useEffect(() => {
     loadSets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadSets() {
@@ -46,6 +55,16 @@ export default function Sets() {
     navigate(`/practice?set_id=${setId}`);
   }
 
+  function getTheme(set) {
+    return {
+      top_color: set?.top_color || DEFAULT_THEME.top_color,
+      bottom_color: set?.bottom_color || DEFAULT_THEME.bottom_color,
+      text_color: set?.text_color || DEFAULT_THEME.text_color,
+      accent_color: set?.accent_color || DEFAULT_THEME.accent_color,
+      border_radius: set?.border_radius || DEFAULT_THEME.border_radius,
+    };
+  }
+
   return (
     <div style={styles.page}>
       <div style={styles.container}>
@@ -69,31 +88,114 @@ export default function Sets() {
 
         {!loading && !error && sets.length > 0 && (
           <div style={styles.grid}>
-            {sets.map((set) => (
-              <div key={set.set_id} style={styles.card}>
-                <h2 style={styles.setTitle}>{set.title}</h2>
-                <p style={styles.description}>
-                  {set.description || "No description"}
-                </p>
+            {sets.map((set) => {
+              const theme = getTheme(set);
 
-                <p style={styles.meta}>
-                  <strong>Set ID:</strong> {set.set_id}
-                </p>
+              const cardWrapperStyle = {
+                ...styles.cardWrapper,
+                borderRadius: theme.border_radius,
+                border: `2px solid ${theme.accent_color}`,
+              };
 
-                <div style={styles.buttonRow}>
-                  <Link to={`/sets/${set.set_id}`} style={styles.linkButton}>
-                    Open Set
-                  </Link>
+              const topHalfStyle = {
+                ...styles.topHalf,
+                background: theme.top_color,
+                color: theme.text_color,
+              };
 
-                  <button
-                    style={styles.primaryButton}
-                    onClick={() => startPractice(set.set_id)}
-                  >
-                    Practice This Set
-                  </button>
+              const bottomHalfStyle = {
+                ...styles.bottomHalf,
+                background: theme.bottom_color,
+                color: theme.text_color,
+                borderTop: `1px solid ${theme.accent_color}`,
+              };
+
+              const themedOpenButtonStyle = {
+                ...styles.linkButton,
+                backgroundColor: "#3b82f6",
+                color: "#ffffff",
+              };
+
+              const themedPracticeButtonStyle = {
+                ...styles.primaryButton,
+                backgroundColor: "#22c55e",
+                color: "#ffffff",
+                
+              };
+
+              return (
+                <div key={set.set_id} style={cardWrapperStyle}>
+                  <div style={topHalfStyle}>
+                    <h2 style={styles.setTitle}>{set.title}</h2>
+                    <p style={styles.description}>
+                      {set.description || "No description"}
+                    </p>
+                  </div>
+
+                  <div style={bottomHalfStyle}>
+                    <p style={styles.meta}>
+                      <strong>Set ID:</strong> {set.set_id}
+                    </p>
+
+                    <div style={styles.previewThemeRow}>
+                      <span
+                        style={{
+                          ...styles.themeDot,
+                          background: theme.top_color,
+                          border: "1px solid rgba(255,255,255,0.25)",
+                        }}
+                        title="Top colour"
+                      />
+                      <span
+                        style={{
+                          ...styles.themeDot,
+                          background: theme.bottom_color,
+                          border: "1px solid rgba(255,255,255,0.25)",
+                        }}
+                        title="Bottom colour"
+                      />
+                      <span
+                        style={{
+                          ...styles.themeDot,
+                          background: theme.text_color,
+                          border: "1px solid rgba(255,255,255,0.25)",
+                        }}
+                        title="Text colour"
+                      />
+                      <span
+                        style={{
+                          ...styles.themeDot,
+                          background: theme.accent_color,
+                          border: "1px solid rgba(255,255,255,0.25)",
+                        }}
+                        title="Accent colour"
+                      />
+                      <span style={styles.shapeLabel}>
+                        Shape:{" "}
+                        {theme.border_radius === "0px"
+                          ? "Square"
+                          : theme.border_radius === "24px"
+                          ? "Soft"
+                          : "Rounded"}
+                      </span>
+                    </div>
+
+                    <div style={styles.buttonRow}>
+                      <Link to={`/sets/${set.set_id}`} style={themedOpenButtonStyle}>
+                        Open Set
+                      </Link>
+
+                      <button
+                        style={themedPracticeButtonStyle}
+                        onClick={() => startPractice(set.set_id)}
+                      >
+                        Practice This Set
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -131,18 +233,47 @@ const styles = {
     borderRadius: 12,
     boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
   },
+  cardWrapper: {
+    overflow: "hidden",
+    boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+  },
+  topHalf: {
+    padding: 20,
+  },
+  bottomHalf: {
+    padding: 20,
+  },
   setTitle: {
     marginTop: 0,
     marginBottom: 10,
   },
   description: {
     opacity: 0.9,
-    marginBottom: 16,
+    marginBottom: 0,
+    lineHeight: 1.5,
   },
   meta: {
     fontSize: 14,
     opacity: 0.9,
+    marginBottom: 12,
+  },
+  previewThemeRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
     marginBottom: 16,
+  },
+  themeDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 999,
+    display: "inline-block",
+  },
+  shapeLabel: {
+    fontSize: 13,
+    opacity: 0.95,
+    marginLeft: 4,
   },
   buttonRow: {
     display: "flex",

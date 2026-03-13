@@ -19,7 +19,14 @@ CREATE TABLE IF NOT EXISTS flashcard_set (
   title         VARCHAR(120) NOT NULL,
   description   VARCHAR(500),
   created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  background_color VARCHAR(20) NOT NULL DEFAULT '#121a2a',
+  top_color VARCHAR(20) NOT NULL DEFAULT '#121a2a',
+  bottom_color VARCHAR(20) NOT NULL DEFAULT '#0b1220',
+  text_color VARCHAR(20) NOT NULL DEFAULT '#ffffff',
+  accent_color VARCHAR(20) NOT NULL DEFAULT '#3b82f6',
+  border_radius VARCHAR(20) NOT NULL DEFAULT '12px',
   last_modified DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  
 
   CONSTRAINT fk_flashcard_set_user
     FOREIGN KEY (user_id) REFERENCES users(user_id)
