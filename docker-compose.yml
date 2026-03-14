@@ -39,15 +39,15 @@ services:
       - mysql
       - nlp
     environment:
-      DB_HOST: mysql
-      DB_USER: root
-      DB_PASSWORD: root
-      DB_NAME: fyp
-      JWT_SECRET: super_secret_change_me
-      NLP_URL: "http://nlp:6000"
-      EMAIL_USER: CHANGE_ME
-      EMAIL_PASS: CHANGE_ME
-      EMAIL_FROM: CHANGE_ME
+      DB_HOST: ${DB_HOST}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      JWT_SECRET: ${JWT_SECRET}
+      NLP_URL: ${NLP_URL}
+      EMAIL_USER: ${EMAIL_USER}
+      EMAIL_PASS: ${EMAIL_PASS}
+      EMAIL_FROM: ${EMAIL_FROM}
 
   nlp:
     build: ./nlp-service
