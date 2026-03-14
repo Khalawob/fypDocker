@@ -23,9 +23,12 @@ export default function SetDetails() {
   const [success, setSuccess] = useState("");
 
   const [reminderEnabled, setReminderEnabled] = useState(false);
+  const [adaptiveEnabled, setAdaptiveEnabled] = useState(false);
   const [intervalHours, setIntervalHours] = useState(24);
   const [nextReviewAt, setNextReviewAt] = useState(null);
   const [lastSentAt, setLastSentAt] = useState(null);
+  const [lastAccuracy, setLastAccuracy] = useState(null);
+  const [lastIntervalHours, setLastIntervalHours] = useState(null);
   const [reminderLoading, setReminderLoading] = useState(false);
 
   useEffect(() => {
@@ -68,9 +71,20 @@ export default function SetDetails() {
 
       if (reminderRes.ok) {
         setReminderEnabled(!!reminderData.reminder_enabled);
+        setAdaptiveEnabled(!!reminderData.adaptive_enabled);
         setIntervalHours(Number(reminderData.interval_hours || 24));
         setNextReviewAt(reminderData.next_review_at || null);
         setLastSentAt(reminderData.last_sent_at || null);
+        setLastAccuracy(
+          reminderData.last_accuracy !== null && reminderData.last_accuracy !== undefined
+            ? Number(reminderData.last_accuracy)
+            : null
+        );
+        setLastIntervalHours(
+          reminderData.last_interval_hours !== null && reminderData.last_interval_hours !== undefined
+            ? Number(reminderData.last_interval_hours)
+            : null
+        );
       }
     } catch (err) {
       setError("Server error while loading set details");
@@ -94,6 +108,7 @@ export default function SetDetails() {
         body: JSON.stringify({
           reminder_enabled: reminderEnabled,
           interval_hours: intervalHours,
+          adaptive_enabled: adaptiveEnabled,
         }),
       });
 
@@ -286,7 +301,7 @@ export default function SetDetails() {
           <div style={styles.reminderCard}>
             <h3 style={styles.reminderTitle}>Study Reminder</h3>
             <p style={styles.reminderText}>
-              Choose how often you want an email reminder to review this set.
+              Choose whether this set uses a manual review interval or adaptive review timing.
             </p>
 
             <label style={styles.checkboxRow}>
@@ -298,12 +313,22 @@ export default function SetDetails() {
               Enable reminders for this set
             </label>
 
+            <label style={styles.checkboxRow}>
+              <input
+                type="checkbox"
+                checked={adaptiveEnabled}
+                onChange={(e) => setAdaptiveEnabled(e.target.checked)}
+                disabled={!reminderEnabled}
+              />
+              Use adaptive spaced repetition timing
+            </label>
+
             <label style={styles.reminderLabel}>Reminder Interval</label>
             <select
               value={intervalHours}
               onChange={(e) => setIntervalHours(Number(e.target.value))}
               style={styles.reminderInput}
-              disabled={!reminderEnabled}
+              disabled={!reminderEnabled || adaptiveEnabled}
             >
               <option value={6}>Every 6 hours</option>
               <option value={12}>Every 12 hours</option>
@@ -315,10 +340,21 @@ export default function SetDetails() {
 
             <div style={styles.reminderMeta}>
               <div>
+                <strong>Reminder mode:</strong> {adaptiveEnabled ? "Adaptive" : "Manual"}
+              </div>
+              <div>
                 <strong>Next review:</strong> {formatDateTime(nextReviewAt)}
               </div>
               <div>
                 <strong>Last email sent:</strong> {formatDateTime(lastSentAt)}
+              </div>
+              <div>
+                <strong>Last recorded accuracy:</strong>{" "}
+                {lastAccuracy !== null ? `${Math.round(lastAccuracy * 100)}%` : "Not available yet"}
+              </div>
+              <div>
+                <strong>Last interval used by system:</strong>{" "}
+                {lastIntervalHours !== null ? `${lastIntervalHours} hours` : "Not available yet"}
               </div>
             </div>
 

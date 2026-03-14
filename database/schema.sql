@@ -289,6 +289,9 @@ CREATE TABLE IF NOT EXISTS set_review_reminder (
   last_sent_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  adaptive_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  last_accuracy DECIMAL(5,2) NULL,
+  last_interval_hours INT NULL,
 
   CONSTRAINT fk_set_reminder_user
     FOREIGN KEY (user_id) REFERENCES users(user_id)

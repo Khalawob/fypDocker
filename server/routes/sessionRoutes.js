@@ -3,6 +3,8 @@
 const express = require("express"); // Express
 const db = require("../db"); // MySQL connection
 const { requireAuth } = require("../middleware/auth"); // JWT middleware
+const { updateAdaptiveSetReminder } = require("../utils/setReviewScheduler");
+
 
 const router = express.Router(); // Router
 
@@ -26,10 +28,11 @@ function clamp(n, min, max) {
  * Finalises a session and updates PER-USER difficulty in user_flashcard_stats
  * based on performance_result.
  */
+
 async function completeSessionForUser(sessionId, userId) {
   // 1) Ensure session belongs to user
   const sessionRows = await query(
-    "SELECT session_id FROM practice_session WHERE session_id = ? AND user_id = ?",
+    "SELECT session_id, set_id, difficulty_mode FROM practice_session WHERE session_id = ? AND user_id = ?",
     [sessionId, userId]
   );
 
@@ -38,6 +41,8 @@ async function completeSessionForUser(sessionId, userId) {
     err.status = 404;
     throw err;
   }
+
+  const session = sessionRows[0];
 
   // 2) Aggregate performance per flashcard for this session
   const perf = await query(
@@ -157,6 +162,32 @@ async function completeSessionForUser(sessionId, userId) {
     "UPDATE practice_session SET completed_at = NOW(), final_score = ? WHERE session_id = ?",
     [finalScore, sessionId]
   );
+
+  const accuracy = totalAttempts > 0 ? totalCorrect / totalAttempts : 0;
+
+  try {
+    const reminderRows = await query(
+      `SELECT reminder_enabled, adaptive_enabled
+       FROM set_review_reminder
+       WHERE user_id = ? AND set_id = ?`,
+      [userId, session.set_id]
+    );
+
+    if (reminderRows.length > 0) {
+      const reminder = reminderRows[0];
+
+      if (Number(reminder.reminder_enabled) === 1 && Number(reminder.adaptive_enabled) === 1) {
+        await updateAdaptiveSetReminder({
+          userId,
+          setId: session.set_id,
+          accuracy,
+          difficultyMode: session.difficulty_mode,
+        });
+      }
+    }
+  } catch (schedulerErr) {
+    console.error("Adaptive reminder scheduling error:", schedulerErr);
+  }
 
   // Return completion payload (used by endpoint + practice auto-complete)
   return {

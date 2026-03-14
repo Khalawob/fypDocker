@@ -84,6 +84,13 @@ export default function Practice() {
   const [isFlipping, setIsFlipping] = useState(false);
   const [flipDirection, setFlipDirection] = useState("forward");
 
+  const [reminderEnabled, setReminderEnabled] = useState(true);
+  const [adaptiveReminderEnabled, setAdaptiveReminderEnabled] = useState(false);
+  const [reminderIntervalHours, setReminderIntervalHours] = useState(24);
+  const [reminderSaving, setReminderSaving] = useState(false);
+  const [reminderMessage, setReminderMessage] = useState("");
+  const [showReminderPrompt, setShowReminderPrompt] = useState(false);
+
   const token = localStorage.getItem("token");
   const autoActionLockRef = useRef(false);
   const answerStartTimeRef = useRef(null);
@@ -146,6 +153,68 @@ export default function Practice() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  async function loadReminderForFinishedSet() {
+    if (!form.set_id || !token) return;
+
+    try {
+      const { res, data } = await apiFetch(`/api/sets/${form.set_id}/reminder`, {
+        method: "GET",
+      });
+
+      if (!res.ok) return;
+
+      if (data.reminder_enabled) {
+        setShowReminderPrompt(false);
+        return;
+      }
+
+      setReminderEnabled(true);
+      setAdaptiveReminderEnabled(false);
+      setReminderIntervalHours(24);
+      setReminderMessage("");
+      setShowReminderPrompt(true);
+    } catch {
+      // Keep silent
+    }
+  }
+
+  useEffect(() => {
+    if (finished) {
+      loadReminderForFinishedSet();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finished]);
+
+  async function saveSetReminderFromPractice() {
+    if (!form.set_id) return;
+
+    try {
+      setReminderSaving(true);
+      setReminderMessage("");
+
+      const { res, data } = await apiFetch(`/api/sets/${form.set_id}/reminder`, {
+        method: "POST",
+        body: JSON.stringify({
+          reminder_enabled: reminderEnabled,
+          interval_hours: reminderIntervalHours,
+          adaptive_enabled: adaptiveReminderEnabled,
+        }),
+      });
+
+      if (!res.ok) {
+        setReminderMessage(data?.message || "Failed to save reminder");
+        return;
+      }
+
+      setReminderMessage(data?.message || "Reminder saved successfully");
+      setShowReminderPrompt(false);
+    } catch {
+      setReminderMessage("Server error while saving reminder");
+    } finally {
+      setReminderSaving(false);
+    }
+  }
+
   async function startSession(e) {
     e.preventDefault();
     setError("");
@@ -158,6 +227,8 @@ export default function Practice() {
     setUserAnswer("");
     setTimerSeconds(null);
     setTimerMaxSeconds(null);
+    setReminderMessage("");
+    setShowReminderPrompt(false);
     answerStartTimeRef.current = null;
     autoActionLockRef.current = false;
     previousPhaseRef.current = null;
@@ -337,6 +408,8 @@ export default function Practice() {
     setTimeoutMessage("");
     setTimerSeconds(null);
     setTimerMaxSeconds(null);
+    setReminderMessage("");
+    setShowReminderPrompt(false);
     answerStartTimeRef.current = null;
     autoActionLockRef.current = false;
     previousPhaseRef.current = null;
@@ -1268,6 +1341,75 @@ export default function Practice() {
                     </div>
                   </div>
                 )}
+
+                {showReminderPrompt && (
+                  <div style={styles.reminderPromptCard}>
+                    <h3 style={styles.reminderPromptTitle}>
+                      Would you like reminders for this set?
+                    </h3>
+
+                    <p style={styles.reminderPromptText}>
+                      You can choose a manual reminder interval or let the app schedule reviews automatically.
+                    </p>
+
+                    <label style={styles.checkboxRow}>
+                      <input
+                        type="checkbox"
+                        checked={reminderEnabled}
+                        onChange={(e) => setReminderEnabled(e.target.checked)}
+                      />
+                      Enable reminders for this set
+                    </label>
+
+                    <label style={styles.checkboxRow}>
+                      <input
+                        type="checkbox"
+                        checked={adaptiveReminderEnabled}
+                        onChange={(e) => setAdaptiveReminderEnabled(e.target.checked)}
+                        disabled={!reminderEnabled}
+                      />
+                      Use adaptive spaced repetition timing
+                    </label>
+
+                    <label style={styles.label}>Reminder Interval</label>
+                    <select
+                      value={reminderIntervalHours}
+                      onChange={(e) => setReminderIntervalHours(Number(e.target.value))}
+                      style={styles.input}
+                      disabled={!reminderEnabled || adaptiveReminderEnabled}
+                    >
+                      <option value={6}>Every 6 hours</option>
+                      <option value={12}>Every 12 hours</option>
+                      <option value={24}>Every 1 day</option>
+                      <option value={48}>Every 2 days</option>
+                      <option value={72}>Every 3 days</option>
+                      <option value={168}>Every 7 days</option>
+                    </select>
+
+                    {reminderMessage && (
+                      <div style={styles.inlineReminderMessage}>{reminderMessage}</div>
+                    )}
+
+                    <div style={styles.actionRow}>
+                      <button
+                        type="button"
+                        style={reminderSaving ? themedDisabledButtonStyle : themedButtonStyle}
+                        onClick={saveSetReminderFromPractice}
+                        disabled={reminderSaving}
+                      >
+                        {reminderSaving ? "Saving..." : "Save Reminder"}
+                      </button>
+
+                      <button
+                        type="button"
+                        style={styles.secondaryButton}
+                        onClick={() => setShowReminderPrompt(false)}
+                      >
+                        Not Now
+                      </button>
+                    </div>
+                  </div>
+                )}
               </>
             ) : (
               <p>No summary returned.</p>
@@ -1699,5 +1841,40 @@ const styles = {
     justifyContent: "center",
     gap: 12,
     flexWrap: "wrap",
+  },
+  reminderPromptCard: {
+    background: "#09101d",
+    border: "1px solid #23304c",
+    borderRadius: 12,
+    padding: 20,
+    marginTop: 24,
+  },
+  reminderPromptTitle: {
+    marginTop: 0,
+    marginBottom: 10,
+  },
+  reminderPromptText: {
+    marginTop: 0,
+    marginBottom: 16,
+    opacity: 0.9,
+    lineHeight: 1.5,
+  },
+  inlineReminderMessage: {
+    background: "rgba(59,130,246,0.15)",
+    color: "#bfdbfe",
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 12,
+    border: "1px solid rgba(59,130,246,0.25)",
+  },
+  secondaryButton: {
+    padding: "12px 16px",
+    borderRadius: 8,
+    border: "1px solid #334155",
+    background: "#0b1220",
+    color: "white",
+    fontWeight: 700,
+    cursor: "pointer",
+    marginTop: 8,
   },
 };
