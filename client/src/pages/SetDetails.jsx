@@ -22,6 +22,12 @@ export default function SetDetails() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const [reminderEnabled, setReminderEnabled] = useState(false);
+  const [intervalHours, setIntervalHours] = useState(24);
+  const [nextReviewAt, setNextReviewAt] = useState(null);
+  const [lastSentAt, setLastSentAt] = useState(null);
+  const [reminderLoading, setReminderLoading] = useState(false);
+
   useEffect(() => {
     loadSetDetails();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -38,13 +44,15 @@ export default function SetDetails() {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       };
 
-      const [setRes, flashcardsRes] = await Promise.all([
+      const [setRes, flashcardsRes, reminderRes] = await Promise.all([
         fetch(`${API_URL}/api/sets/${setId}`, { headers }),
         fetch(`${API_URL}/api/sets/${setId}/cards`, { headers }),
+        fetch(`${API_URL}/api/sets/${setId}/reminder`, { headers }),
       ]);
 
       const setData = await setRes.json().catch(() => ({}));
       const flashcardsData = await flashcardsRes.json().catch(() => []);
+      const reminderData = await reminderRes.json().catch(() => ({}));
 
       if (!setRes.ok) {
         setError(setData?.message || "Failed to load set information");
@@ -57,10 +65,51 @@ export default function SetDetails() {
           ? flashcardsData
           : flashcardsData?.flashcards || []
       );
+
+      if (reminderRes.ok) {
+        setReminderEnabled(!!reminderData.reminder_enabled);
+        setIntervalHours(Number(reminderData.interval_hours || 24));
+        setNextReviewAt(reminderData.next_review_at || null);
+        setLastSentAt(reminderData.last_sent_at || null);
+      }
     } catch (err) {
       setError("Server error while loading set details");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function saveReminder() {
+    try {
+      setReminderLoading(true);
+      setError("");
+      setSuccess("");
+
+      const res = await fetch(`${API_URL}/api/sets/${setId}/reminder`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          reminder_enabled: reminderEnabled,
+          interval_hours: intervalHours,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setError(data?.message || "Failed to save reminder");
+        return;
+      }
+
+      setSuccess(data?.message || "Reminder settings saved");
+      await loadSetDetails();
+    } catch (err) {
+      setError("Server error while saving reminder");
+    } finally {
+      setReminderLoading(false);
     }
   }
 
@@ -133,6 +182,13 @@ export default function SetDetails() {
     navigate(`/practice?set_id=${setId}`);
   }
 
+  function formatDateTime(value) {
+    if (!value) return "Not scheduled";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString();
+  }
+
   const theme = {
     top_color: setInfo?.top_color || DEFAULT_THEME.top_color,
     bottom_color: setInfo?.bottom_color || DEFAULT_THEME.bottom_color,
@@ -173,11 +229,11 @@ export default function SetDetails() {
   };
 
   const practiceButtonStyle = {
-  ...styles.primaryButton,
-  backgroundColor: "#22c55e",
-  color: "#ffffff",
-  border: "none",
-};
+    ...styles.primaryButton,
+    backgroundColor: "#22c55e",
+    color: "#ffffff",
+    border: "none",
+  };
 
   const addFlashcardButtonStyle = {
     ...styles.primaryButtonLink,
@@ -225,6 +281,57 @@ export default function SetDetails() {
         {loading && <div style={styles.cardShell}>Loading set...</div>}
         {error && <div style={styles.error}>{error}</div>}
         {success && <div style={styles.success}>{success}</div>}
+
+        {!loading && !error && (
+          <div style={styles.reminderCard}>
+            <h3 style={styles.reminderTitle}>Study Reminder</h3>
+            <p style={styles.reminderText}>
+              Choose how often you want an email reminder to review this set.
+            </p>
+
+            <label style={styles.checkboxRow}>
+              <input
+                type="checkbox"
+                checked={reminderEnabled}
+                onChange={(e) => setReminderEnabled(e.target.checked)}
+              />
+              Enable reminders for this set
+            </label>
+
+            <label style={styles.reminderLabel}>Reminder Interval</label>
+            <select
+              value={intervalHours}
+              onChange={(e) => setIntervalHours(Number(e.target.value))}
+              style={styles.reminderInput}
+              disabled={!reminderEnabled}
+            >
+              <option value={6}>Every 6 hours</option>
+              <option value={12}>Every 12 hours</option>
+              <option value={24}>Every 1 day</option>
+              <option value={48}>Every 2 days</option>
+              <option value={72}>Every 3 days</option>
+              <option value={168}>Every 7 days</option>
+            </select>
+
+            <div style={styles.reminderMeta}>
+              <div>
+                <strong>Next review:</strong> {formatDateTime(nextReviewAt)}
+              </div>
+              <div>
+                <strong>Last email sent:</strong> {formatDateTime(lastSentAt)}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              style={practiceButtonStyle}
+              onClick={saveReminder}
+              disabled={reminderLoading}
+            >
+              {reminderLoading ? "Saving..." : "Save Reminder"}
+            </button>
+          </div>
+        )}
 
         {!loading && !error && flashcards.length === 0 && (
           <div style={cardWrapperStyle}>
@@ -412,6 +519,51 @@ const styles = {
     textDecoration: "none",
     fontWeight: 700,
     display: "inline-block",
+  },
+  reminderCard: {
+    background: "#121a2a",
+    padding: 20,
+    borderRadius: 12,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+    marginBottom: 20,
+  },
+  reminderTitle: {
+    marginTop: 0,
+    marginBottom: 10,
+  },
+  reminderText: {
+    marginTop: 0,
+    marginBottom: 16,
+    opacity: 0.9,
+    lineHeight: 1.5,
+  },
+  checkboxRow: {
+    display: "flex",
+    gap: 8,
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  reminderLabel: {
+    display: "block",
+    marginBottom: 6,
+    fontWeight: 600,
+  },
+  reminderInput: {
+    width: "100%",
+    padding: 10,
+    borderRadius: 8,
+    border: "1px solid #2b3550",
+    background: "#0b1220",
+    color: "white",
+    marginBottom: 16,
+    boxSizing: "border-box",
+  },
+  reminderMeta: {
+    display: "grid",
+    gap: 6,
+    marginBottom: 16,
+    opacity: 0.9,
+    fontSize: 14,
   },
   error: {
     background: "rgba(239,68,68,0.15)",

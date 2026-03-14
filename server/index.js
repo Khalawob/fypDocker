@@ -11,6 +11,8 @@ const sessionRoutes = require("./routes/sessionRoutes");     // Session routes (
 const practiceRoutes = require("./routes/practiceRoutes");   // Practice engine routes
 const calibrationRoutes = require("./routes/calibrationRoutes"); // Calibration routes 
 const profileRoutes = require("./routes/profileRoutes"); // User profile routes
+const setReminderRoutes = require("./routes/setReminderRoutes"); // Set review reminder routes
+const { startReminderJob } = require("./jobs/reminderJob"); // Reminder job
 
 
 const app = express();  // Create Express app
@@ -44,6 +46,9 @@ app.use("/api", calibrationRoutes);
 // User profile routes
 app.use("/api/profile", profileRoutes);
 
+// Set review reminder routes
+app.use("/api/sets", setReminderRoutes);
+
 // End points for tests
 
 app.get("/", (req, res) => {
@@ -62,6 +67,7 @@ app.get("/test-db", (req, res) => {
 //START SERVER
 
 const PORT = 5000;
+startReminderJob(); // Start the reminder job when the server starts
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });

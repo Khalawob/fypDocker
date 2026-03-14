@@ -279,4 +279,24 @@ CREATE TABLE IF NOT EXISTS user_profile (
     ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS set_review_reminder (
+  reminder_id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  set_id INT NOT NULL,
+  reminder_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  interval_hours INT NOT NULL,
+  next_review_at DATETIME NOT NULL,
+  last_sent_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
+  CONSTRAINT fk_set_reminder_user
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+    ON DELETE CASCADE,
+
+  CONSTRAINT fk_set_reminder_set
+    FOREIGN KEY (set_id) REFERENCES flashcard_set(set_id)
+    ON DELETE CASCADE,
+
+  CONSTRAINT uq_user_set_reminder UNIQUE (user_id, set_id)
+);

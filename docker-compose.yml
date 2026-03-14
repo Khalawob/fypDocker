@@ -45,6 +45,9 @@ services:
       DB_NAME: fyp
       JWT_SECRET: super_secret_change_me
       NLP_URL: "http://nlp:6000"
+      EMAIL_USER: CHANGE_ME
+      EMAIL_PASS: CHANGE_ME
+      EMAIL_FROM: CHANGE_ME
 
   nlp:
     build: ./nlp-service
