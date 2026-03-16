@@ -257,6 +257,13 @@ export default function SetDetails() {
     border: "none",
   };
 
+  const importButtonStyle = {
+    ...styles.primaryButtonLink,
+    backgroundColor: "#0ea5e9",
+    color: "#ffffff",
+    border: "none",
+  };
+
   return (
     <div style={styles.page}>
       <div style={styles.container}>
@@ -281,6 +288,10 @@ export default function SetDetails() {
 
             <Link to={`/sets/${setId}/add-flashcard`} style={addFlashcardButtonStyle}>
               Add Flashcard
+            </Link>
+
+            <Link to={`/sets/${setId}/import-document`} style={importButtonStyle}>
+              Import Document
             </Link>
 
             <button style={practiceButtonStyle} onClick={startPractice}>

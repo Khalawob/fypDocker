@@ -13,6 +13,8 @@ const calibrationRoutes = require("./routes/calibrationRoutes"); // Calibration 
 const profileRoutes = require("./routes/profileRoutes"); // User profile routes
 const setReminderRoutes = require("./routes/setReminderRoutes"); // Set review reminder routes
 const { startReminderJob } = require("./jobs/reminderJob"); // Reminder job
+const documentImportRoutes = require("./routes/documentImportRoutes");
+const documentTextRoutes = require("./routes/documentTextRoutes");
 
 
 const app = express();  // Create Express app
@@ -48,6 +50,12 @@ app.use("/api/profile", profileRoutes);
 
 // Set review reminder routes
 app.use("/api/sets", setReminderRoutes);
+
+// Document import route
+app.use("/api", documentImportRoutes);
+
+app.use("/api", documentTextRoutes);
+
 
 // End points for tests
 

@@ -203,5 +203,381 @@ def generate():
     })
 
 
+BAD_TERMS = {
+    "what", "which", "who", "where", "when", "why", "how",
+    "this", "that", "these", "those",
+    "it", "they", "them", "he", "she", "we", "you",
+    "something", "anything", "someone", "somebody"
+}
+
+MAX_SENTENCE_WORDS = 30
+MIN_SENTENCE_WORDS = 5
+MAX_ANSWER_WORDS = 20
+MIN_ANSWER_WORDS = 1
+
+
+def clean_text(text: str) -> str:
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    return text
+
+
+def normalize_term(term: str) -> str:
+    term = clean_text(term)
+    term = re.sub(r"^the\s+", "", term, flags=re.IGNORECASE)
+    return term.strip()
+
+
+def is_bad_term(term: str) -> bool:
+    t = term.strip().lower()
+    if not t:
+        return True
+    if t in BAD_TERMS:
+        return True
+    if len(t) < 2:
+        return True
+    words = t.split()
+    if all(w in BAD_TERMS for w in words):
+        return True
+    return False
+
+
+def valid_sentence(sent_text: str) -> bool:
+    words = sent_text.split()
+    if len(words) < MIN_SENTENCE_WORDS or len(words) > MAX_SENTENCE_WORDS:
+        return False
+
+    lower = sent_text.strip().lower()
+
+    if lower.endswith("?"):
+        return False
+
+    if lower.startswith(("this ", "that ", "these ", "those ", "it ", "they ")):
+        return False
+
+    return True
+
+
+def extract_subject_phrase(sent):
+    """
+    Try to get the main noun phrase before the root verb.
+    """
+    root = None
+    for token in sent:
+        if token.dep_ == "ROOT":
+            root = token
+            break
+
+    if not root:
+        return None
+
+    subjects = [t for t in sent if t.dep_ in ("nsubj", "nsubjpass", "attr")]
+    if not subjects:
+        return None
+
+    subj = subjects[0]
+
+    subtree = list(subj.subtree)
+    subtree = sorted(subtree, key=lambda x: x.i)
+    phrase = clean_text(" ".join(tok.text for tok in subtree))
+    phrase = normalize_term(phrase)
+
+    if is_bad_term(phrase):
+        return None
+
+    return phrase
+
+
+def shorten_answer(text: str, keep_that_clause: bool = False) -> str:
+    """
+    Keep the core idea and remove trailing clauses/examples.
+    """
+    text = clean_text(text)
+
+    if keep_that_clause:
+        split_pattern = r"\b(because|which|who|where|when|although|since)\b"
+    else:
+        split_pattern = r"\b(because|which|that|who|where|when|although|since)\b"
+
+    # cut at weaker trailing clause markers
+    parts = re.split(split_pattern, text, maxsplit=1, flags=re.IGNORECASE)
+    if parts:
+        text = parts[0].strip(" ,;:-")
+
+    # trim at punctuation if still too long
+    text = re.split(r"[;:]", text)[0].strip()
+
+    if text.lower().startswith("responsible for "):
+        text = "the part responsible for " + text[len("responsible for "):]
+
+    words = text.split()
+    if len(words) > MAX_ANSWER_WORDS:
+        text = " ".join(words[:MAX_ANSWER_WORDS]).strip()
+
+    text = clean_text(text)
+    text = text.strip(" .,:;!-")
+    return text
+
+
+def answer_word_count_ok(answer: str) -> bool:
+    wc = len(answer.split())
+    return MIN_ANSWER_WORDS <= wc <= MAX_ANSWER_WORDS
+
+
+def question_is_valid(question: str) -> bool:
+    q = question.strip().lower()
+    bad_patterns = [
+        "what is what",
+        "what are what",
+        "what is this",
+        "what is that",
+        "what are these",
+        "what are those"
+    ]
+    return q not in bad_patterns
+
+
+def dedupe_cards(cards):
+    seen = set()
+    unique = []
+    for card in cards:
+        key = (
+            card["question"].strip().lower(),
+            card["answer"].strip().lower()
+        )
+        if key not in seen:
+            seen.add(key)
+            unique.append(card)
+    return unique
+
+
+def try_abbreviation_card(sent):
+    text = clean_text(sent.text)
+    match = re.match(r"(.+?)\s+stands for\s+(.+)", text, re.IGNORECASE)
+    if not match:
+        return None
+
+    term = normalize_term(match.group(1))
+    answer = clean_text(match.group(2)).strip(" .,:;!-")
+
+    if is_bad_term(term):
+        return None
+    if not answer_word_count_ok(answer):
+        return None
+
+    question = f"What does {term} stand for?"
+
+    if not question_is_valid(question):
+        return None
+
+    return {
+        "question": clean_text(question),
+        "answer": answer
+    }
+
+def try_usage_card(sent):
+    text = clean_text(sent.text)
+
+    match = re.match(r"(.+?)\s+is used (to|for)\s+(.+)", text, re.IGNORECASE)
+    if not match:
+        return None
+
+    term = normalize_term(match.group(1))
+    usage_type = match.group(2).lower()
+    usage_text = clean_text(match.group(3))
+
+    if is_bad_term(term):
+        return None
+
+    if usage_type == "to":
+        answer = shorten_answer(f"to {usage_text}")
+    else:
+        answer = shorten_answer(usage_text)
+
+    if not answer_word_count_ok(answer):
+        return None
+
+    question = f"What is {term} used for?"
+
+    if not question_is_valid(question):
+        return None
+
+    return {
+        "question": clean_text(question),
+        "answer": answer
+    }
+
+
+
+def try_definition_card(sent):
+    """
+    Handles patterns like:
+    X is Y
+    X are Y
+    X refers to Y
+    X means Y
+    """
+    root = None
+    for token in sent:
+        if token.dep_ == "ROOT":
+            root = token
+            break
+
+    if not root:
+        return None
+
+    subject = extract_subject_phrase(sent)
+    if not subject:
+        return None
+
+    subject = normalize_term(subject)
+
+    root_lemma = root.lemma_.lower()
+
+    if root_lemma not in {"be", "refer", "mean"}:
+        return None
+
+    # answer = everything after the root
+    answer_tokens = [t for t in sent if t.i > root.i]
+    if not answer_tokens:
+        return None
+
+    answer = clean_text(" ".join(t.text for t in answer_tokens))
+    answer = shorten_answer(answer, keep_that_clause=True)
+
+    if not answer_word_count_ok(answer):
+        return None
+
+    if root_lemma == "be":
+        if root.tag_ in {"VBP", "VB"} and subject.lower().endswith("s"):
+            question = f"What are {subject}?"
+        else:
+            question = f"What is {subject}?"
+    elif root_lemma == "refer":
+        question = f"What does {subject} refer to?"
+    else:
+        question = f"What does {subject} mean?"
+
+    if is_bad_term(subject):
+        return None
+
+    if not question_is_valid(question):
+        return None
+
+    return {
+        "question": clean_text(question),
+        "answer": answer
+    }
+
+
+def try_purpose_card(sent):
+    """
+    Handles:
+    The function of X is Y
+    The purpose of X is Y
+    The role of X is Y
+    """
+    text = clean_text(sent.text)
+    lower = text.lower()
+
+    match = re.match(r"the (function|purpose|role) of (.+?) is (.+)", lower, re.IGNORECASE)
+    if not match:
+        return None
+
+    label = match.group(1)
+    raw_term = clean_text(text[len(f"The {label} of "):])
+    pieces = re.split(r"\bis\b", raw_term, maxsplit=1, flags=re.IGNORECASE)
+    if len(pieces) < 2:
+        return None
+
+    term = clean_text(pieces[0])
+    term = normalize_term(term)
+    answer = shorten_answer(pieces[1])
+
+    if is_bad_term(term):
+        return None
+    if not answer_word_count_ok(answer):
+        return None
+
+    question = f"What is the {label} of {term}?"
+    if not question_is_valid(question):
+        return None
+
+    return {
+        "question": clean_text(question),
+        "answer": answer
+    }
+
+
+def score_card(card):
+    score = 0
+    q = card["question"]
+    a = card["answer"]
+
+    if 5 <= len(a.split()) <= 18:
+        score += 2
+    if q.lower().startswith(("what is ", "what are ", "what does ")):
+        score += 2
+    if "stand for" in q.lower():
+        score += 2
+    if "used for" in q.lower():
+        score += 1
+    if len(q.split()) <= 8:
+        score += 1
+    if any(bad in q.lower() for bad in ["what is what", "what are what"]):
+        score -= 5
+    if len(a.split()) > 20:
+        score -= 3
+
+    return score
+
+
+@app.post("/generate-flashcards")
+def generate_flashcards():
+    data = request.get_json(force=True)
+
+    text = data.get("text", "")
+    max_cards = int(data.get("max_cards", 10))
+
+    if not text.strip():
+        return jsonify({"error": "text is required"}), 400
+
+    doc = nlp(text)
+    cards = []
+
+    for sent in doc.sents:
+        sent_text = clean_text(sent.text)
+
+        if not valid_sentence(sent_text):
+            continue
+
+        card = try_abbreviation_card(sent)
+        if not card:
+            card = try_purpose_card(sent)
+        if not card:
+            card = try_usage_card(sent)
+        if not card:
+            card = try_definition_card(sent)
+
+        if not card:
+            continue
+
+        score = score_card(card)
+
+        if score < 3:
+            continue
+
+        card["score"] = score
+        cards.append(card)
+
+    cards = dedupe_cards(cards)
+    cards = cards[:max_cards]
+
+    return jsonify({
+        "cards": cards,
+        "count": len(cards)
+    })
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=6000)

@@ -13,6 +13,7 @@ import About from "./pages/About";
 import Calibration from "./pages/Calibration";
 import Home from "./pages/Home";
 import NotFound from "./pages/NotFound";
+import ImportDocument from "./pages/ImportDocument";
 
 function App() {
   return (
@@ -31,6 +32,7 @@ function App() {
         <Route path="/profile" element={<Profile />} />
         <Route path="/about" element={<About />} />
         <Route path="/calibration" element={<Calibration />} />
+        <Route path="/sets/:setId/import-document" element={<ImportDocument />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
