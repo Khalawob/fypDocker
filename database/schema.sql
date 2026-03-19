@@ -137,6 +137,7 @@ CREATE TABLE IF NOT EXISTS practice_settings (
   reading_speed_modifier FLOAT NOT NULL DEFAULT 1.0,
   prompt_type VARCHAR(50) NOT NULL DEFAULT 'NORMAL_HIDDEN',
   blank_ratio FLOAT NULL,
+  blank_style VARCHAR(30) NOT NULL DEFAULT 'FIRST_LETTER',
   seed INT NULL,
 
 

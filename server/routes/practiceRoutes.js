@@ -252,6 +252,72 @@ function safeJsonParse(text, fallback) {
   }
 }
 
+// Normalize blanking prompt type from frontend / stored values
+function normalizePromptType(promptType) {
+  const raw = String(promptType || "NORMAL_HIDDEN").trim().toUpperCase();
+
+  if (raw === "ALL_BLANK_FIRST_LETTERS") return "ALL_BLANKS";
+  if (raw === "ALL_FULL_BLANKS") return "ALL_BLANKS";
+  if (raw === "RANDOM_FULL_BLANKS") return "RANDOM_BLANKS";
+
+  return raw;
+}
+
+// Normalize blank style from frontend / stored values
+function normalizeBlankStyle(blankStyle, promptType) {
+  const rawStyle = String(blankStyle || "").trim().toUpperCase();
+  const rawPromptType = String(promptType || "").trim().toUpperCase();
+
+  if (rawStyle === "FIRST_LETTER" || rawStyle === "FULL") {
+    return rawStyle;
+  }
+
+  if (rawPromptType === "ALL_FULL_BLANKS" || rawPromptType === "RANDOM_FULL_BLANKS") {
+    return "FULL";
+  }
+
+  return "FIRST_LETTER";
+}
+
+// Build NLP payload using separated prompt_type + blank_style
+function buildBlankPayload({
+  answerText,
+  promptType,
+  blankStyle,
+  blankRatio,
+  seed,
+  attemptNumber,
+  difficultyLevel,
+}) {
+  const payload = {
+    text: answerText,
+    variation_type: normalizePromptType(promptType),
+    blank_style: normalizeBlankStyle(blankStyle, promptType),
+  };
+
+  if (
+    payload.variation_type === "RANDOM_BLANKS" ||
+    payload.variation_type === "INCREASING_DIFFICULTY"
+  ) {
+    if (blankRatio !== null && blankRatio !== undefined) {
+      payload.blank_ratio = Number(blankRatio);
+    }
+    if (seed !== null && seed !== undefined) {
+      payload.seed = Number(seed);
+    }
+  }
+
+  if (payload.variation_type === "INCREASING_DIFFICULTY" && attemptNumber !== undefined) {
+    payload.attempt_number = Number(attemptNumber);
+  }
+
+  if (payload.variation_type === "DIFFICULTY_LEVEL_BLANKS" && difficultyLevel !== undefined) {
+    payload.difficulty_level = Number(difficultyLevel);
+  }
+
+  return payload;
+}
+
 
 // Build a compact summary for the frontend end screen (with top 3 hardest cards)
 async function buildCompactSummary(completion, mode, totalCards, setId) {
@@ -316,7 +382,6 @@ async function buildCompactSummary(completion, mode, totalCards, setId) {
 
 
 
-
 // POST /api/practice/start. Creates practice_session + practice_settings
 
 
@@ -334,6 +399,7 @@ router.post("/start", requireAuth, async (req, res) => {
       use_adaptive_answer_timing = null,  // new (null means "inherit from legacy")
       reading_speed_modifier = 1.0, // User-controlled timing modifier (e.g. 0.8 for 20% faster, 1.2 for 20% slower)
       prompt_type = "NORMAL_HIDDEN", // NORMAL_HIDDEN or NLP variation type
+      blank_style = "FIRST_LETTER", // FIRST_LETTER or FULL
       blank_ratio = null, // For random blanking types
       seed = null, // For deterministic randomness
     } = req.body || {}; // Default to {} if missing body
@@ -431,13 +497,16 @@ router.post("/start", requireAuth, async (req, res) => {
         ? !!use_adaptive_timing
         : !!use_adaptive_answer_timing;
 
+    const normalizedPromptType = normalizePromptType(prompt_type);
+    const normalizedBlankStyle = normalizeBlankStyle(blank_style, prompt_type);
+
   
     await query(
       `INSERT INTO practice_settings
        (session_id, group_size, randomize_order, 
        use_adaptive_timing, use_adaptive_preview_timing, use_adaptive_answer_timing, 
-       reading_speed_modifier, prompt_type, blank_ratio, seed)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, // Insert settings row
+       reading_speed_modifier, prompt_type, blank_style, blank_ratio, seed)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, // Insert settings row
       [
         session_id, // FK to session
         group_size, // Store group size
@@ -449,7 +518,8 @@ router.post("/start", requireAuth, async (req, res) => {
         adaptiveAnswer, // Store adaptive answer timing
 
         Number(reading_speed_modifier) || 1.0, // Store reading speed modifier
-        String(prompt_type), // Store prompt type
+        String(normalizedPromptType), // Store prompt type
+        String(normalizedBlankStyle), // Store blank style
         blank_ratio !== null && blank_ratio !== undefined ? Number(blank_ratio) : null, // Store blank ratio
         seed !== null && seed !== undefined ? Number(seed) : session_id, // Default seed to session_id
       ]
@@ -503,7 +573,8 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
 
     const seed = Number(settings.seed ?? sessionId); // Determine seed
     const groupSize = Math.max(1, Number(settings.group_size) || 5); // Determine group size
-    const promptType = String(settings.prompt_type || "NORMAL_HIDDEN"); // Determine prompt type
+    const promptType = normalizePromptType(settings.prompt_type || "NORMAL_HIDDEN"); // Determine prompt type
+    const blankStyle = normalizeBlankStyle(settings.blank_style || "FIRST_LETTER", settings.prompt_type); // Determine blank style
     const nlpUrl = (process.env.NLP_URL || "http://127.0.0.1:6000").trim(); // NLP base URL
     
 
@@ -689,11 +760,17 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
 
 
       // NLP prompt in TEST: generate variation from answer
-      const payload = { text: card.answer, variation_type: promptType }; // NLP request payload
+      const payload = buildBlankPayload({
+        answerText: card.answer,
+        promptType,
+        blankStyle,
+        blankRatio: settings.blank_ratio,
+        seed: seed + remaining.length,
+      }); // NLP request payload
 
 
       // Add randomness controls for random-based variations
-      if (promptType === "RANDOM_BLANKS" || promptType === "RANDOM_FULL_BLANKS" || promptType === "INCREASING_DIFFICULTY") {
+      if (promptType === "RANDOM_BLANKS" || promptType === "INCREASING_DIFFICULTY") {
         if (settings.blank_ratio !== null && settings.blank_ratio !== undefined) payload.blank_ratio = Number(settings.blank_ratio); // Add blank ratio
         payload.seed = seed + remaining.length; // Vary seed per step
       }
@@ -779,6 +856,7 @@ router.get("/:sessionId/next", requireAuth, async (req, res) => {
         flashcard_id: card.flashcard_id,
         question: card.question,
         prompt_type: promptType,
+        blank_style: blankStyle,
         blanked_text: axRes.data.blanked_text,
         first_letter_clues: axRes.data.first_letter_clues,
       });
@@ -904,11 +982,16 @@ if (String(session.difficulty_mode) === "EASY") {
     }
 
     // BLANKS (generate from answer, like MODERATE TEST / HARD TEST)
-    const payload = { text: card.answer, variation_type: promptType };
+    const payload = buildBlankPayload({
+      answerText: card.answer,
+      promptType,
+      blankStyle,
+      blankRatio: settings.blank_ratio,
+      seed: seed + idx,
+    });
 
     if (
       promptType === "RANDOM_BLANKS" ||
-      promptType === "RANDOM_FULL_BLANKS" ||
       promptType === "INCREASING_DIFFICULTY"
     ) {
       if (settings.blank_ratio !== null && settings.blank_ratio !== undefined) {
@@ -971,6 +1054,7 @@ if (String(session.difficulty_mode) === "EASY") {
       answer_time_limit: answerTimeLimitToSend,
       answer_timing_debug: answerTimingDebug,
       prompt_type: promptType,
+      blank_style: blankStyle,
       blanked_text: axRes.data.blanked_text,
       first_letter_clues: axRes.data.first_letter_clues,
     });
@@ -1118,11 +1202,16 @@ if (String(session.difficulty_mode) === "MODERATE") {
   }
 
   // BLANKS (generate from answer like HARD TEST)
-  const payload = { text: card.answer, variation_type: promptType };
+  const payload = buildBlankPayload({
+    answerText: card.answer,
+    promptType,
+    blankStyle,
+    blankRatio: settings.blank_ratio,
+    seed: seed + absoluteIndex,
+  });
 
   if (
     promptType === "RANDOM_BLANKS" ||
-    promptType === "RANDOM_FULL_BLANKS" ||
     promptType === "INCREASING_DIFFICULTY"
   ) {
     if (settings.blank_ratio !== null && settings.blank_ratio !== undefined) {
@@ -1186,6 +1275,7 @@ if (String(session.difficulty_mode) === "MODERATE") {
     answer_time_limit: answerTimeLimitToSend,
     answer_timing_debug: answerTimingDebug,
     prompt_type: promptType,
+    blank_style: blankStyle,
     blanked_text: axRes.data.blanked_text,
     first_letter_clues: axRes.data.first_letter_clues,
   });

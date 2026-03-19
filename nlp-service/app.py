@@ -12,11 +12,14 @@ def is_word(token_text: str) -> bool:
 
 
 def eligible_token(t) -> bool:
-    # Blankable words:
-    # - alphabetic only
-    # - not stopwords (and/or/the etc.)
-    # - length >= 4 (your requirement)
     return is_word(t.text) and (not t.is_stop) and len(t.text) >= 4
+
+
+def normalize_blank_style(blank_style: str) -> str:
+    value = str(blank_style or "FIRST_LETTER").strip().upper()
+    if value not in {"FIRST_LETTER", "FULL"}:
+        return "FIRST_LETTER"
+    return value
 
 
 @app.post("/generate")
@@ -24,21 +27,17 @@ def generate():
     data = request.get_json(force=True)
 
     text = data.get("text", "")
-    variation_type = data.get("variation_type", "ALL_BLANK_FIRST_LETTERS")
+    variation_type = str(data.get("variation_type", "ALL_BLANKS")).strip().upper()
+    blank_style = normalize_blank_style(data.get("blank_style", "FIRST_LETTER"))
 
-    # Used by RANDOM_BLANKS / RANDOM_FULL_BLANKS / INCREASING_DIFFICULTY
     blank_ratio = data.get("blank_ratio", None)
-
-    # Used for reproducible randomness (optional)
     seed = data.get("seed", None)
 
-    # Used by INCREASING_DIFFICULTY
     attempt_number = int(data.get("attempt_number", 1))
     base_blank_ratio = float(data.get("base_blank_ratio", 0.30))
     step = float(data.get("step", 0.15))
     max_blank_ratio = float(data.get("max_blank_ratio", 0.85))
 
-    # Used by DIFFICULTY_LEVEL_BLANKS
     difficulty_level = int(data.get("difficulty_level", 1))
 
     if not text.strip():
@@ -48,25 +47,22 @@ def generate():
         random.seed(seed)
 
     doc = nlp(text)
-
-    # Eligible candidates to blank
     candidates = [t for t in doc if eligible_token(t)]
     blank_set = set()
 
-    # Controls how blanks are rendered:
-    # True  -> first letter + underscores (m__________)
-    # False -> underscores only (__________)
-    blank_with_first_letter = True
+    # blank_style now controls rendering only
+    blank_with_first_letter = blank_style == "FIRST_LETTER"
 
     # ----------------------------
-    # 1) ALL_BLANK_FIRST_LETTERS
+    # ALL_BLANKS
+    # Blank all eligible words
     # ----------------------------
-    if variation_type == "ALL_BLANK_FIRST_LETTERS":
+    if variation_type == "ALL_BLANKS":
         blank_set = set(candidates)
-        blank_with_first_letter = True
 
     # ----------------------------
-    # 2) RANDOM_BLANKS (first letter + underscores)
+    # RANDOM_BLANKS
+    # Blank a percentage of eligible words
     # ----------------------------
     elif variation_type == "RANDOM_BLANKS":
         ratio = float(blank_ratio) if blank_ratio is not None else 0.40
@@ -78,50 +74,30 @@ def generate():
             k = max(1, int(len(candidates) * ratio))
             blank_set = set(random.sample(candidates, min(k, len(candidates))))
 
-        blank_with_first_letter = True
-
     # ----------------------------
-    # NEW) RANDOM_FULL_BLANKS (underscores only, no first letter)
-    # ----------------------------
-    elif variation_type == "RANDOM_FULL_BLANKS":
-        ratio = float(blank_ratio) if blank_ratio is not None else 0.40
-        ratio = max(0.0, min(1.0, ratio))
-
-        if not candidates:
-            blank_set = set()
-        else:
-            k = max(1, int(len(candidates) * ratio))
-            blank_set = set(random.sample(candidates, min(k, len(candidates))))
-
-        blank_with_first_letter = False
-
-    # ----------------------------
-    # 3) KEY_TERMS_ONLY
-    # Blank nouns / proper nouns and named entities (if eligible)
+    # KEY_TERMS_ONLY
+    # Blank nouns / proper nouns / entities
     # ----------------------------
     elif variation_type == "KEY_TERMS_ONLY":
         key_terms = []
         for t in doc:
             if not eligible_token(t):
                 continue
-
             if t.pos_ in ("NOUN", "PROPN") or t.ent_type_:
                 key_terms.append(t)
 
         blank_set = set(key_terms)
-        blank_with_first_letter = True
 
     # ----------------------------
-    # 4) EVERY_OTHER_WORD
-    # Deterministic pattern: blank every other eligible word
+    # EVERY_OTHER_WORD
+    # Blank every other eligible word
     # ----------------------------
     elif variation_type == "EVERY_OTHER_WORD":
         blank_set = set(candidates[::2])
-        blank_with_first_letter = True
 
     # ----------------------------
-    # 5) INCREASING_DIFFICULTY
-    # More blanks each attempt (ratio increases), capped at max_blank_ratio
+    # INCREASING_DIFFICULTY
+    # More blanks each attempt
     # ----------------------------
     elif variation_type == "INCREASING_DIFFICULTY":
         if blank_ratio is not None:
@@ -140,10 +116,8 @@ def generate():
                 k = max(1, int(len(candidates) * ratio))
                 blank_set = set(random.sample(candidates, min(k, len(candidates))))
 
-        blank_with_first_letter = True
-
     # ----------------------------
-    # 6) DIFFICULTY_LEVEL_BLANKS
+    # DIFFICULTY_LEVEL_BLANKS
     # Level 1: 25%, Level 2: 50%, Level 3: 75%, Level 4: 100%
     # ----------------------------
     elif variation_type == "DIFFICULTY_LEVEL_BLANKS":
@@ -159,19 +133,9 @@ def generate():
                 k = max(1, int(len(candidates) * ratio))
                 blank_set = set(random.sample(candidates, min(k, len(candidates))))
 
-        blank_with_first_letter = True
-
-    # ALL_FULL_BLANKS
-    # Blank ALL eligible words, no first-letter clues
-    # ----------------------------
-    elif variation_type == "ALL_FULL_BLANKS":
-        blank_set = set(candidates)
-        blank_with_first_letter = False
-
     else:
         return jsonify({"error": f"Unknown variation_type: {variation_type}"}), 400
 
-    # Build outputs preserving punctuation + whitespace
     out_tokens = []
     clue_tokens = []
 
@@ -185,7 +149,7 @@ def generate():
             else:
                 blanked = "_" * len(t.text)
                 out_tokens.append(blanked)
-                clue_tokens.append("")  # no first-letter clue
+                clue_tokens.append("")
         else:
             out_tokens.append(t.text)
             clue_tokens.append(t.text)
@@ -199,7 +163,7 @@ def generate():
 
     return jsonify({
         "blanked_text": blanked_text,
-        "first_letter_clues": first_letter_clues
+        "first_letter_clues": first_letter_clues if blank_with_first_letter else ""
     })
 
 
@@ -259,9 +223,6 @@ def valid_sentence(sent_text: str) -> bool:
 
 
 def extract_subject_phrase(sent):
-    """
-    Try to get the main noun phrase before the root verb.
-    """
     root = None
     for token in sent:
         if token.dep_ == "ROOT":
@@ -276,7 +237,6 @@ def extract_subject_phrase(sent):
         return None
 
     subj = subjects[0]
-
     subtree = list(subj.subtree)
     subtree = sorted(subtree, key=lambda x: x.i)
     phrase = clean_text(" ".join(tok.text for tok in subtree))
@@ -289,9 +249,6 @@ def extract_subject_phrase(sent):
 
 
 def shorten_answer(text: str, keep_that_clause: bool = False) -> str:
-    """
-    Keep the core idea and remove trailing clauses/examples.
-    """
     text = clean_text(text)
 
     if keep_that_clause:
@@ -299,12 +256,10 @@ def shorten_answer(text: str, keep_that_clause: bool = False) -> str:
     else:
         split_pattern = r"\b(because|which|that|who|where|when|although|since)\b"
 
-    # cut at weaker trailing clause markers
     parts = re.split(split_pattern, text, maxsplit=1, flags=re.IGNORECASE)
     if parts:
         text = parts[0].strip(" ,;:-")
 
-    # trim at punctuation if still too long
     text = re.split(r"[;:]", text)[0].strip()
 
     if text.lower().startswith("responsible for "):
@@ -375,6 +330,7 @@ def try_abbreviation_card(sent):
         "answer": answer
     }
 
+
 def try_usage_card(sent):
     text = clean_text(sent.text)
 
@@ -408,15 +364,7 @@ def try_usage_card(sent):
     }
 
 
-
 def try_definition_card(sent):
-    """
-    Handles patterns like:
-    X is Y
-    X are Y
-    X refers to Y
-    X means Y
-    """
     root = None
     for token in sent:
         if token.dep_ == "ROOT":
@@ -431,13 +379,11 @@ def try_definition_card(sent):
         return None
 
     subject = normalize_term(subject)
-
     root_lemma = root.lemma_.lower()
 
     if root_lemma not in {"be", "refer", "mean"}:
         return None
 
-    # answer = everything after the root
     answer_tokens = [t for t in sent if t.i > root.i]
     if not answer_tokens:
         return None
@@ -471,12 +417,6 @@ def try_definition_card(sent):
 
 
 def try_purpose_card(sent):
-    """
-    Handles:
-    The function of X is Y
-    The purpose of X is Y
-    The role of X is Y
-    """
     text = clean_text(sent.text)
     lower = text.lower()
 

@@ -9,17 +9,13 @@ const PROMPT_TYPES = {
     label: "Hidden Answer",
     description: "The full answer is hidden. You must recall it completely from memory.",
   },
-  ALL_BLANK_FIRST_LETTERS: {
-    label: "First Letter Clues",
-    description: "All important words are hidden but the first letter is shown as a clue.",
+  ALL_BLANKS: {
+    label: "All Eligible Words",
+    description: "All eligible words are blanked based on the blank style you choose.",
   },
   RANDOM_BLANKS: {
-    label: "Partial Blanks",
-    description: "Some key words are hidden with their first letters visible.",
-  },
-  RANDOM_FULL_BLANKS: {
-    label: "Random Blanks (No Clues)",
-    description: "Some words are removed completely with no letter hints.",
+    label: "Random Blanks",
+    description: "A selected proportion of eligible words are blanked.",
   },
   KEY_TERMS_ONLY: {
     label: "Key Terms Only",
@@ -37,9 +33,16 @@ const PROMPT_TYPES = {
     label: "Difficulty Levels",
     description: "The number of blanks depends on the difficulty level.",
   },
-  ALL_FULL_BLANKS: {
-    label: "All Words Hidden",
-    description: "All eligible words are removed. No hints are shown.",
+};
+
+const BLANK_STYLES = {
+  FIRST_LETTER: {
+    label: "First Letter Hints",
+    description: "Show the first letter of each blanked word.",
+  },
+  FULL: {
+    label: "Full Blanks",
+    description: "Hide blanked words completely with no first-letter hints.",
   },
 };
 
@@ -58,6 +61,7 @@ export default function Practice() {
     set_id: searchParams.get("set_id") || "",
     difficulty_mode: "EASY",
     prompt_type: "NORMAL_HIDDEN",
+    blank_style: "FIRST_LETTER",
     randomize_order: true,
     group_size: 5,
     answer_time_limit: 120,
@@ -112,12 +116,29 @@ export default function Practice() {
       : {}),
   };
 
+  const usesBlanking = form.prompt_type !== "NORMAL_HIDDEN";
+  const usesBlankRatio = ["RANDOM_BLANKS", "INCREASING_DIFFICULTY"].includes(
+    form.prompt_type
+  );
+
   function onChange(e) {
     const { name, value, type, checked } = e.target;
-    setForm((prev) => ({
-      ...prev,
-      [name]: type === "checkbox" ? checked : value,
-    }));
+    setForm((prev) => {
+      const next = {
+        ...prev,
+        [name]: type === "checkbox" ? checked : value,
+      };
+
+      if (name === "prompt_type" && value === "NORMAL_HIDDEN") {
+        next.blank_ratio = "";
+      }
+
+      if (name === "prompt_type" && !["RANDOM_BLANKS", "INCREASING_DIFFICULTY"].includes(value)) {
+        next.blank_ratio = "";
+      }
+
+      return next;
+    });
   }
 
   async function apiFetch(path, options = {}) {
@@ -261,6 +282,7 @@ export default function Practice() {
         set_id: Number(form.set_id),
         difficulty_mode: form.difficulty_mode,
         prompt_type: form.prompt_type,
+        blank_style: form.blank_style,
         randomize_order: !!form.randomize_order,
         group_size: Number(form.group_size),
         answer_time_limit: Number(form.answer_time_limit),
@@ -268,7 +290,7 @@ export default function Practice() {
         use_adaptive_timing: !!form.use_adaptive_timing,
       };
 
-      if (form.blank_ratio !== "") {
+      if (usesBlankRatio && form.blank_ratio !== "") {
         payload.blank_ratio = Number(form.blank_ratio);
       }
 
@@ -874,6 +896,27 @@ export default function Practice() {
                   {PROMPT_TYPES[form.prompt_type]?.description}
                 </div>
               </div>
+
+              {usesBlanking && (
+                <div>
+                  <label style={styles.label}>Blank Style</label>
+                  <select
+                    name="blank_style"
+                    value={form.blank_style}
+                    onChange={onChange}
+                    style={styles.input}
+                  >
+                    {Object.entries(BLANK_STYLES).map(([value, config]) => (
+                      <option key={value} value={value}>
+                        {config.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div style={styles.helpText}>
+                    {BLANK_STYLES[form.blank_style]?.description}
+                  </div>
+                </div>
+              )}
             </div>
 
             <button
@@ -889,24 +932,26 @@ export default function Practice() {
                 <div style={styles.subsectionTitle}>Advanced Settings</div>
 
                 <div style={styles.grid}>
-                  <div>
-                    <label style={styles.label}>Blank Ratio</label>
-                    <input
-                      name="blank_ratio"
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      max="1"
-                      value={form.blank_ratio}
-                      onChange={onChange}
-                      style={styles.input}
-                      placeholder="e.g. 0.4"
-                    />
-                    <div style={styles.helpText}>
-                      Controls how many words are hidden. Example: 0.4 means about 40% of
-                      eligible words are blanked.
+                  {usesBlankRatio && (
+                    <div>
+                      <label style={styles.label}>Blank Ratio</label>
+                      <input
+                        name="blank_ratio"
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        max="1"
+                        value={form.blank_ratio}
+                        onChange={onChange}
+                        style={styles.input}
+                        placeholder="e.g. 0.4"
+                      />
+                      <div style={styles.helpText}>
+                        Controls how many words are hidden. Example: 0.4 means about 40% of
+                        eligible words are blanked.
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   <div>
                     <label style={styles.label}>Group Size</label>
@@ -1092,20 +1137,21 @@ export default function Practice() {
                           {currentCard.blanked_text}
                         </div>
 
-                        {currentCard.first_letter_clues && (
-                          <>
-                            <div style={themedAnswerLabelStyle}>Clues</div>
-                            <div
-                              style={styles.noCopyText}
-                              onCopy={(e) => e.preventDefault()}
-                              onCut={(e) => e.preventDefault()}
-                              onContextMenu={(e) => e.preventDefault()}
-                              onDragStart={(e) => e.preventDefault()}
-                            >
-                              {currentCard.first_letter_clues}
-                            </div>
-                          </>
-                        )}
+                        {currentCard.blank_style === "FIRST_LETTER" &&
+                          currentCard.first_letter_clues && (
+                            <>
+                              <div style={themedAnswerLabelStyle}>Clues</div>
+                              <div
+                                style={styles.noCopyText}
+                                onCopy={(e) => e.preventDefault()}
+                                onCut={(e) => e.preventDefault()}
+                                onContextMenu={(e) => e.preventDefault()}
+                                onDragStart={(e) => e.preventDefault()}
+                              >
+                                {currentCard.first_letter_clues}
+                              </div>
+                            </>
+                          )}
                       </div>
                     )}
 
