@@ -1,9 +1,11 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
+import { useBackground } from "../context/BackgroundContext";
 
 export default function Home() {
   const navigate = useNavigate();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const { selectedBackground } = useBackground();
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -14,10 +16,23 @@ export default function Home() {
     localStorage.removeItem("token");
     setIsLoggedIn(false);
     navigate("/");
+    window.location.reload();
   }
 
+  const pageStyle = {
+    ...styles.page,
+    ...(selectedBackground?.image_url
+      ? {
+          backgroundImage: `linear-gradient(rgba(11,18,32,0.78), rgba(11,18,32,0.78)), url(${selectedBackground.image_url})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundAttachment: "fixed",
+        }
+      : {}),
+  };
+
   return (
-    <div style={styles.page}>
+    <div style={pageStyle}>
       <div style={styles.card}>
         <h1 style={styles.title}>Flashcard App</h1>
         <p style={styles.subtitle}>Welcome to your practice system</p>

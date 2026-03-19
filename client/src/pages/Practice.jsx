@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, Link } from "react-router-dom";
+import { useBackground } from "../context/BackgroundContext";
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
@@ -96,6 +97,20 @@ export default function Practice() {
   const answerStartTimeRef = useRef(null);
   const previousPhaseRef = useRef(null);
   const flipTimeoutRef = useRef(null);
+
+  const { selectedBackground } = useBackground();
+
+  const pageStyle = {
+    ...styles.page,
+    ...(selectedBackground?.image_url
+      ? {
+          backgroundImage: `linear-gradient(rgba(11,18,32,0.78), rgba(11,18,32,0.78)), url(${selectedBackground.image_url})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundAttachment: "fixed",
+        }
+      : {}),
+  };
 
   function onChange(e) {
     const { name, value, type, checked } = e.target;
@@ -770,7 +785,7 @@ export default function Practice() {
   };
 
   return (
-    <div style={styles.page}>
+    <div style={pageStyle}>
       <div style={styles.container}>
         <div style={styles.headerRow}>
           <h1 style={styles.title}>Practice Mode</h1>

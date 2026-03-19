@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { useBackground } from "../context/BackgroundContext";
 
 // Use env variable for Docker, fallback to localhost for normal dev
 // works locally and in docker without code changes
@@ -17,6 +18,20 @@ export default function Register() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  const { selectedBackground } = useBackground();
+
+  const pageStyle = {
+    ...styles.page,
+    ...(selectedBackground?.image_url
+      ? {
+          backgroundImage: `linear-gradient(rgba(11,18,32,0.78), rgba(11,18,32,0.78)), url(${selectedBackground.image_url})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundAttachment: "fixed",
+        }
+      : {}),
+  };
 
   function onChange(e) {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -72,7 +87,7 @@ export default function Register() {
   }
 
   return (
-    <div style={styles.page}>
+    <div style={pageStyle}>
       <form onSubmit={onSubmit} style={styles.card}>
         <h2 style={styles.title}>Create an account</h2>
 

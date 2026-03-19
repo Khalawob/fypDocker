@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useBackground } from "../context/BackgroundContext";
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
@@ -14,6 +15,7 @@ const DEFAULT_THEME = {
 export default function CreateSet() {
   const navigate = useNavigate();
   const token = localStorage.getItem("token");
+  const { selectedBackground } = useBackground();
 
   const [form, setForm] = useState({
     title: "",
@@ -28,6 +30,18 @@ export default function CreateSet() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
+  const pageStyle = {
+    ...styles.page,
+    ...(selectedBackground?.image_url
+      ? {
+          backgroundImage: `linear-gradient(rgba(11,18,32,0.78), rgba(11,18,32,0.78)), url(${selectedBackground.image_url})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundAttachment: "fixed",
+        }
+      : {}),
+  };
 
   function onChange(e) {
     const { name, value } = e.target;
@@ -91,7 +105,6 @@ export default function CreateSet() {
 
       setSuccess("Flashcard set created successfully");
 
-      // Try to return user to sets page
       setTimeout(() => {
         navigate("/sets");
       }, 800);
@@ -124,7 +137,7 @@ export default function CreateSet() {
   };
 
   return (
-    <div style={styles.page}>
+    <div style={pageStyle}>
       <div style={styles.container}>
         <div style={styles.headerRow}>
           <h1 style={styles.title}>Create Flashcard Set</h1>

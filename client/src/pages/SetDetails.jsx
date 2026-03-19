@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { useBackground } from "../context/BackgroundContext";
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
@@ -30,6 +31,20 @@ export default function SetDetails() {
   const [lastAccuracy, setLastAccuracy] = useState(null);
   const [lastIntervalHours, setLastIntervalHours] = useState(null);
   const [reminderLoading, setReminderLoading] = useState(false);
+
+  const { selectedBackground } = useBackground();
+
+  const pageStyle = {
+    ...styles.page,
+    ...(selectedBackground?.image_url
+      ? {
+          backgroundImage: `linear-gradient(rgba(11,18,32,0.78), rgba(11,18,32,0.78)), url(${selectedBackground.image_url})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundAttachment: "fixed",
+        }
+      : {}),
+  };
 
   useEffect(() => {
     loadSetDetails();
@@ -265,7 +280,7 @@ export default function SetDetails() {
   };
 
   return (
-    <div style={styles.page}>
+    <div style={pageStyle}>
       <div style={styles.container}>
         <div style={styles.headerRow}>
           <div>

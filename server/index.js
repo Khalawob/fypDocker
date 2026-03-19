@@ -15,6 +15,7 @@ const setReminderRoutes = require("./routes/setReminderRoutes"); // Set review r
 const { startReminderJob } = require("./jobs/reminderJob"); // Reminder job
 const documentImportRoutes = require("./routes/documentImportRoutes");
 const documentTextRoutes = require("./routes/documentTextRoutes");
+const backgroundRoutes = require("./routes/backgroundRoutes");
 
 
 const app = express();  // Create Express app
@@ -54,7 +55,11 @@ app.use("/api/sets", setReminderRoutes);
 // Document import route
 app.use("/api", documentImportRoutes);
 
+// document text route
 app.use("/api", documentTextRoutes);
+
+// Background routes
+app.use("/api/backgrounds", backgroundRoutes);
 
 
 // End points for tests

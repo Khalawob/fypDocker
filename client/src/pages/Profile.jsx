@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { useBackground } from "../context/BackgroundContext";
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
 export default function Profile() {
   const token = localStorage.getItem("token");
+  const { selectedBackground, refreshBackground } = useBackground();
 
   const [profile, setProfile] = useState(null);
   const [form, setForm] = useState({
@@ -16,6 +18,10 @@ export default function Profile() {
     preferred_difficulty: "",
   });
 
+  const [backgrounds, setBackgrounds] = useState([]);
+  const [backgroundLoading, setBackgroundLoading] = useState(true);
+  const [selectingBackgroundId, setSelectingBackgroundId] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -24,6 +30,7 @@ export default function Profile() {
 
   useEffect(() => {
     loadProfile();
+    loadBackgrounds();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -53,14 +60,36 @@ export default function Profile() {
         bio: data.bio || "",
         avatar_url: data.avatar_url || "",
         timezone: data.timezone || "",
-        study_goal_minutes_per_day:
-          data.study_goal_minutes_per_day ?? "",
+        study_goal_minutes_per_day: data.study_goal_minutes_per_day ?? "",
         preferred_difficulty: data.preferred_difficulty || "",
       });
     } catch (err) {
       setError("Server error while loading profile");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadBackgrounds() {
+    try {
+      setBackgroundLoading(true);
+
+      const res = await fetch(`${API_URL}/api/backgrounds/me`, {
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) return;
+
+      setBackgrounds(Array.isArray(data?.backgrounds) ? data.backgrounds : []);
+    } catch (err) {
+      console.error("Failed to load backgrounds");
+    } finally {
+      setBackgroundLoading(false);
     }
   }
 
@@ -80,8 +109,7 @@ export default function Profile() {
       bio: profile.bio || "",
       avatar_url: profile.avatar_url || "",
       timezone: profile.timezone || "",
-      study_goal_minutes_per_day:
-        profile.study_goal_minutes_per_day ?? "",
+      study_goal_minutes_per_day: profile.study_goal_minutes_per_day ?? "",
       preferred_difficulty: profile.preferred_difficulty || "",
     });
 
@@ -139,8 +167,73 @@ export default function Profile() {
     }
   }
 
+  async function selectBackground(backgroundId) {
+    const selectionKey = backgroundId === null ? "default" : String(backgroundId);
+
+    try {
+      setSelectingBackgroundId(selectionKey);
+      setError("");
+      setSuccess("");
+
+      const res = await fetch(`${API_URL}/api/backgrounds/me/select`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          background_id: backgroundId,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setError(data?.message || "Failed to select background");
+        return;
+      }
+
+      setSuccess(
+        backgroundId === null
+          ? "Default background selected successfully"
+          : "Background selected successfully"
+      );
+
+      await loadBackgrounds();
+      await loadProfile();
+      await refreshBackground();
+    } catch (err) {
+      setError("Server error while selecting background");
+    } finally {
+      setSelectingBackgroundId("");
+    }
+  }
+
+  const backgroundOptions = [
+    {
+      background_id: null,
+      name: "Default",
+      image_url: null,
+      is_unlocked: 1,
+      is_selected: profile?.selected_background_id == null ? 1 : 0,
+    },
+    ...backgrounds,
+  ];
+
+  const pageStyle = {
+    ...styles.page,
+    ...(selectedBackground?.image_url
+      ? {
+          backgroundImage: `linear-gradient(rgba(11,18,32,0.78), rgba(11,18,32,0.78)), url(${selectedBackground.image_url})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundAttachment: "fixed",
+        }
+      : {}),
+  };
+
   return (
-    <div style={styles.page}>
+    <div style={pageStyle}>
       <div style={styles.container}>
         <div style={styles.headerRow}>
           <div>
@@ -280,6 +373,82 @@ export default function Profile() {
                     : "Unknown"}
                 </div>
               </div>
+            </div>
+
+            <div style={styles.cardWide}>
+              <h2 style={styles.sectionTitle}>Unlocked Backgrounds</h2>
+
+              {backgroundLoading ? (
+                <div style={styles.text}>Loading backgrounds...</div>
+              ) : backgroundOptions.length === 0 ? (
+                <div style={styles.text}>No backgrounds found.</div>
+              ) : (
+                <div style={styles.backgroundGrid}>
+                  {backgroundOptions.map((bg) => {
+                    const unlocked = Number(bg.is_unlocked) === 1;
+                    const selected = Number(bg.is_selected) === 1;
+                    const selectionKey =
+                      bg.background_id === null ? "default" : String(bg.background_id);
+
+                    return (
+                      <div
+                        key={bg.background_id ?? "default-background"}
+                        style={styles.backgroundCard}
+                      >
+                        <div
+                          style={{
+                            ...styles.backgroundPreview,
+                            ...(bg.image_url
+                              ? {
+                                  backgroundImage: `url(${bg.image_url})`,
+                                }
+                              : {
+                                  background:
+                                    "linear-gradient(180deg, #121a2a 0%, #0b1220 100%)",
+                                }),
+                          }}
+                        />
+
+                        <div style={styles.backgroundName}>{bg.name}</div>
+
+                        <div style={styles.backgroundStatusRow}>
+                          {selected ? (
+                            <span style={styles.selectedBadge}>Selected</span>
+                          ) : unlocked ? (
+                            <span style={styles.unlockedBadge}>Unlocked</span>
+                          ) : (
+                            <span style={styles.lockedBadge}>Locked</span>
+                          )}
+                        </div>
+
+                        <button
+                          style={
+                            !unlocked
+                              ? styles.disabledButton
+                              : selected
+                              ? styles.secondaryButton
+                              : styles.primaryButton
+                          }
+                          disabled={
+                            !unlocked ||
+                            selected ||
+                            selectingBackgroundId === selectionKey
+                          }
+                          onClick={() => selectBackground(bg.background_id)}
+                        >
+                          {!unlocked
+                            ? "Locked"
+                            : selected
+                            ? "Selected"
+                            : selectingBackgroundId === selectionKey
+                            ? "Selecting..."
+                            : "Use Background"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -432,6 +601,13 @@ const styles = {
     borderRadius: 12,
     boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
   },
+  cardWide: {
+    background: "#121a2a",
+    padding: 20,
+    borderRadius: 12,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+    gridColumn: "1 / -1",
+  },
   sectionTitle: {
     marginTop: 0,
     marginBottom: 20,
@@ -545,6 +721,24 @@ const styles = {
     cursor: "pointer",
     fontWeight: 700,
   },
+  secondaryButton: {
+    padding: "10px 14px",
+    borderRadius: 8,
+    border: "1px solid #334155",
+    background: "#0f172a",
+    color: "white",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
+  disabledButton: {
+    padding: "10px 14px",
+    borderRadius: 8,
+    border: "1px solid #334155",
+    background: "#1e293b",
+    color: "#94a3b8",
+    cursor: "not-allowed",
+    fontWeight: 700,
+  },
   editButton: {
     padding: "10px 14px",
     borderRadius: 8,
@@ -580,5 +774,63 @@ const styles = {
     borderRadius: 8,
     marginBottom: 16,
     border: "1px solid rgba(34,197,94,0.25)",
+  },
+  backgroundGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 16,
+  },
+  backgroundCard: {
+    background: "#0f172a",
+    border: "1px solid #334155",
+    borderRadius: 12,
+    padding: 14,
+  },
+  backgroundPreview: {
+    width: "100%",
+    height: 120,
+    borderRadius: 10,
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+    backgroundColor: "#1e293b",
+    marginBottom: 12,
+    border: "1px solid #334155",
+  },
+  backgroundName: {
+    fontWeight: 700,
+    marginBottom: 10,
+  },
+  backgroundStatusRow: {
+    marginBottom: 12,
+  },
+  selectedBadge: {
+    display: "inline-block",
+    padding: "6px 10px",
+    borderRadius: 999,
+    background: "rgba(34,197,94,0.2)",
+    color: "#bbf7d0",
+    fontSize: 12,
+    fontWeight: 700,
+    border: "1px solid rgba(34,197,94,0.35)",
+  },
+  unlockedBadge: {
+    display: "inline-block",
+    padding: "6px 10px",
+    borderRadius: 999,
+    background: "rgba(59,130,246,0.2)",
+    color: "#bfdbfe",
+    fontSize: 12,
+    fontWeight: 700,
+    border: "1px solid rgba(59,130,246,0.35)",
+  },
+  lockedBadge: {
+    display: "inline-block",
+    padding: "6px 10px",
+    borderRadius: 999,
+    background: "rgba(148,163,184,0.15)",
+    color: "#cbd5e1",
+    fontSize: 12,
+    fontWeight: 700,
+    border: "1px solid rgba(148,163,184,0.25)",
   },
 };

@@ -1,8 +1,22 @@
 import { Link } from "react-router-dom";
+import { useBackground } from "../context/BackgroundContext";
 
 export default function NotFound() {
-  return (
-    <div style={styles.page}>
+  const { selectedBackground } = useBackground();
+
+  const pageStyle = {
+    ...styles.page,
+    ...(selectedBackground?.image_url
+      ? {
+          backgroundImage: `linear-gradient(rgba(11,18,32,0.78), rgba(11,18,32,0.78)), url(${selectedBackground.image_url})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundAttachment: "fixed",
+        }
+      : {}),
+  };
+    return (
+    <div style={pageStyle}>
       <div style={styles.card}>
         <h1 style={styles.title}>404</h1>
         <p style={styles.subtitle}>Page not found</p>

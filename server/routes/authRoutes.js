@@ -152,12 +152,22 @@ async function updateLoginStreak(userId) {
   );
 }
 
+async function unlockBackgroundsForBadgeCode(userId, badgeCode) {
+  await query(
+    `INSERT IGNORE INTO user_backgrounds (user_id, background_id)
+     SELECT ?, background_id
+     FROM backgrounds
+     WHERE unlock_badge_code = ? AND is_active = 1`,
+    [userId, badgeCode]
+  );
+}
 
 async function awardStreakBadges(userId) {
   const p = await query("SELECT current_streak FROM user_profile WHERE user_id = ?", [userId]);
   const streak = p?.[0]?.current_streak || 0;
 
   const codesToCheck = [];
+  if (streak >= 1) codesToCheck.push("STREAK_1");
   if (streak >= 3) codesToCheck.push("STREAK_3");
   if (streak >= 7) codesToCheck.push("STREAK_7");
   if (streak >= 30) codesToCheck.push("STREAK_30");
@@ -165,7 +175,7 @@ async function awardStreakBadges(userId) {
   if (codesToCheck.length === 0) return;
 
   const badgeRows = await query(
-    `SELECT badge_id FROM badges WHERE code IN (${codesToCheck.map(() => "?").join(",")})`,
+    `SELECT badge_id, code FROM badges WHERE code IN (${codesToCheck.map(() => "?").join(",")})`,
     codesToCheck
   );
 
@@ -174,9 +184,9 @@ async function awardStreakBadges(userId) {
       "INSERT IGNORE INTO user_badges (user_id, badge_id) VALUES (?, ?)",
       [userId, b.badge_id]
     );
+
+    await unlockBackgroundsForBadgeCode(userId, b.code);
   }
 }
-
-
 
 module.exports = router;

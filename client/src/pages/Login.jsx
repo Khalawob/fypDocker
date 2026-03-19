@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useBackground } from "../context/BackgroundContext";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -11,6 +12,20 @@ export default function Login() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  const { selectedBackground } = useBackground();
+
+  const pageStyle = {
+    ...styles.page,
+    ...(selectedBackground?.image_url
+      ? {
+          backgroundImage: `linear-gradient(rgba(11,18,32,0.78), rgba(11,18,32,0.78)), url(${selectedBackground.image_url})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundAttachment: "fixed",
+        }
+      : {}),
+  };
 
   function onChange(e) {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -67,7 +82,7 @@ export default function Login() {
   }
 
   return (
-    <div style={styles.page}>
+    <div style={pageStyle}>
       <form onSubmit={onSubmit} style={styles.card}>
         <h2 style={styles.title}>Welcome back</h2>
 

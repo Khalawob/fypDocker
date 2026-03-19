@@ -239,6 +239,7 @@ CREATE TABLE IF NOT EXISTS badges (
 
 -- Insert some default badges (Can be expanded later)
 INSERT INTO badges (code, name, description) VALUES
+('STREAK_1', '1-day streak', 'Log in 1 day in a row'),
 ('STREAK_3', '3-day streak', 'Log in 3 days in a row'),
 ('STREAK_7', '7-day streak', 'Log in 7 days in a row'),
 ('STREAK_30', '30-day streak', 'Log in 30 days in a row')
@@ -254,6 +255,28 @@ CREATE TABLE IF NOT EXISTS user_badges (
   FOREIGN KEY (badge_id) REFERENCES badges(badge_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS backgrounds (
+  background_id INT AUTO_INCREMENT PRIMARY KEY,
+  code VARCHAR(50) NOT NULL UNIQUE,
+  name VARCHAR(100) NOT NULL,
+  image_url VARCHAR(255) NOT NULL,
+  unlock_badge_code VARCHAR(50) NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO backgrounds (code, name, image_url, unlock_badge_code)
+VALUES
+  ('PIXEL_STARTER', 'Pixel Starter', '/backgrounds/PixelStarter.jpg', 'STREAK_1'),
+  ('PIXEL_CITY', 'City', '/backgrounds/City.jpg', 'STREAK_3'),
+  ('PIXEL_CITY_NIGHT', 'Pixel City (Night)', '/backgrounds/CityNight.webp', 'STREAK_7'),
+  ('NATURE', 'Pixel Nature', '/backgrounds/Nature.webp', 'STREAK_30')
+ON DUPLICATE KEY UPDATE
+  name = VALUES(name),
+  image_url = VALUES(image_url),
+  unlock_badge_code = VALUES(unlock_badge_code);
+
+
 
 
 CREATE TABLE IF NOT EXISTS user_profile (
@@ -262,7 +285,6 @@ CREATE TABLE IF NOT EXISTS user_profile (
   bio VARCHAR(255) NULL,
   avatar_url VARCHAR(255) NULL,
 
-  -- app preferences / personalization
   timezone VARCHAR(64) NULL,
   study_goal_minutes_per_day INT NULL,
   preferred_difficulty ENUM('EASY','MODERATE','HARD') NULL,
@@ -273,10 +295,15 @@ CREATE TABLE IF NOT EXISTS user_profile (
   current_streak INT NOT NULL DEFAULT 0,
   longest_streak INT NOT NULL DEFAULT 0,
   last_login_date DATE NULL,
+  selected_background_id INT NULL,
 
   CONSTRAINT fk_user_profile_user
     FOREIGN KEY (user_id) REFERENCES users(user_id)
-    ON DELETE CASCADE
+    ON DELETE CASCADE,
+
+  CONSTRAINT fk_user_profile_selected_background
+    FOREIGN KEY (selected_background_id) REFERENCES backgrounds(background_id)
+    ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS set_review_reminder (
@@ -302,4 +329,22 @@ CREATE TABLE IF NOT EXISTS set_review_reminder (
     ON DELETE CASCADE,
 
   CONSTRAINT uq_user_set_reminder UNIQUE (user_id, set_id)
+);
+
+
+CREATE TABLE IF NOT EXISTS user_backgrounds (
+  user_background_id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  background_id INT NOT NULL,
+  unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  UNIQUE KEY unique_user_background (user_id, background_id),
+
+  CONSTRAINT fk_user_backgrounds_user
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+    ON DELETE CASCADE,
+
+  CONSTRAINT fk_user_backgrounds_background
+    FOREIGN KEY (background_id) REFERENCES backgrounds(background_id)
+    ON DELETE CASCADE
 );

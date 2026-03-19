@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-
+import { useBackground } from "../context/BackgroundContext";
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
@@ -29,6 +29,20 @@ export default function Calibration() {
   const timerRef = useRef(null);
 
   const [countdown, setCountdown] = useState(null);
+
+  const { selectedBackground } = useBackground();
+
+  const pageStyle = {
+    ...styles.page,
+    ...(selectedBackground?.image_url
+      ? {
+          backgroundImage: `linear-gradient(rgba(11,18,32,0.78), rgba(11,18,32,0.78)), url(${selectedBackground.image_url})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundAttachment: "fixed",
+        }
+      : {}),
+  };
 
   useEffect(() => {
     loadCalibration();
@@ -230,7 +244,7 @@ export default function Calibration() {
   }, [calibration]);
 
   return (
-    <div style={styles.page}>
+    <div style={pageStyle}>
       <div style={styles.container}>
         <div style={styles.headerRow}>
           <h1 style={styles.title}>Reading Speed Calibration</h1>
