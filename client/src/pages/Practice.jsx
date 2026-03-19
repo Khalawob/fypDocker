@@ -829,7 +829,7 @@ export default function Practice() {
                   </option>
                   {availableSets.map((set) => (
                     <option key={set.set_id} value={set.set_id}>
-                      {set.title} (ID: {set.set_id})
+                      {set.title}
                     </option>
                   ))}
                 </select>

@@ -148,9 +148,6 @@ export default function Sets() {
                   </div>
 
                   <div style={bottomHalfStyle}>
-                    <p style={styles.meta}>
-                      <strong>Set ID:</strong> {set.set_id}
-                    </p>
 
                     <div style={styles.previewThemeRow}>
                       <span

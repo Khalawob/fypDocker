@@ -285,7 +285,7 @@ export default function SetDetails() {
         <div style={styles.headerRow}>
           <div>
             <h1 style={styles.title}>
-              {setInfo?.title || `Set ${setId}`}
+              {setInfo?.title || "Flashcard Set"}
             </h1>
             <p style={styles.subtitle}>
               {setInfo?.description || "View and manage flashcards in this set."}
@@ -416,10 +416,6 @@ export default function SetDetails() {
             {flashcards.map((card) => (
               <div key={card.flashcard_id} style={cardWrapperStyle}>
                 <div style={topHalfStyle}>
-                  <div style={metaStyle}>
-                    Flashcard ID: {card.flashcard_id}
-                  </div>
-
                   <div style={styles.block}>
                     <div style={labelStyle}>Question</div>
                     <div style={styles.text}>{card.question}</div>
