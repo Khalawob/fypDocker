@@ -15,12 +15,21 @@ function safeRadius(value) {
   return allowed.includes(value) ? value : "12px";
 }
 
+function query(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.query(sql, params, (err, results) => {
+      if (err) return reject(err);
+      resolve(results);
+    });
+  });
+}
+
 /**
  * CREATE set
  * POST /api/sets
  * body: { title, description? }
  */
-router.post("/", requireAuth, (req, res) => {
+router.post("/", requireAuth, async (req, res) => {
   const {
     title,
     description,
@@ -39,34 +48,48 @@ router.post("/", requireAuth, (req, res) => {
   const safeAccentColor = safeColor(accent_color, "#3b82f6");
   const safeBorderRadius = safeRadius(border_radius);
 
-  db.query(
-    `INSERT INTO flashcard_set
-    (user_id, title, description, top_color, bottom_color, text_color, accent_color, border_radius)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      req.user.userId,
-      title,
-      description || null,
-      safeTopColor,
-      safeBottomColor,
-      safeTextColor,
-      safeAccentColor,
-      safeBorderRadius,
-    ],
-    (err, result) => {
-      if (err) return res.status(500).json({ message: err.message });
-      res.status(201).json({
-        set_id: result.insertId,
+  try {
+    const result = await query(
+      `INSERT INTO flashcard_set
+      (user_id, title, description, top_color, bottom_color, text_color, accent_color, border_radius)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        req.user.userId,
         title,
-        description: description || null,
-        top_color: safeTopColor,
-        bottom_color: safeBottomColor,
-        text_color: safeTextColor,
-        accent_color: safeAccentColor,
-        border_radius: safeBorderRadius,
-      });
+        description || null,
+        safeTopColor,
+        safeBottomColor,
+        safeTextColor,
+        safeAccentColor,
+        safeBorderRadius,
+      ]
+    );
+
+    const badgeRows = await query(
+      "SELECT badge_id FROM badges WHERE code = ?",
+      ["FIRST_SET"]
+    );
+
+    if (badgeRows.length > 0) {
+      await query(
+        "INSERT IGNORE INTO user_badges (user_id, badge_id) VALUES (?, ?)",
+        [req.user.userId, badgeRows[0].badge_id]
+      );
     }
-  );
+
+    res.status(201).json({
+      set_id: result.insertId,
+      title,
+      description: description || null,
+      top_color: safeTopColor,
+      bottom_color: safeBottomColor,
+      text_color: safeTextColor,
+      accent_color: safeAccentColor,
+      border_radius: safeBorderRadius,
+    });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
 });
 
 /**

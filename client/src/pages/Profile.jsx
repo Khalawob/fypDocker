@@ -209,6 +209,13 @@ export default function Profile() {
     }
   }
 
+  function formatDate(value) {
+    if (!value) return "Unknown";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleDateString();
+  }
+
   const backgroundOptions = [
     {
       background_id: null,
@@ -219,6 +226,8 @@ export default function Profile() {
     },
     ...backgrounds,
   ];
+
+  const badges = Array.isArray(profile?.badges) ? profile.badges : [];
 
   const pageStyle = {
     ...styles.page,
@@ -373,6 +382,40 @@ export default function Profile() {
                     : "Unknown"}
                 </div>
               </div>
+            </div>
+
+            <div style={styles.cardWide}>
+              <h2 style={styles.sectionTitle}>Earned Badges</h2>
+
+              {badges.length === 0 ? (
+                <div style={styles.text}>No badges earned yet.</div>
+              ) : (
+                <div style={styles.badgesGrid}>
+                  {badges.map((badge) => (
+                    <div key={badge.badge_id} style={styles.badgeCard}>
+                      {badge.icon ? (
+                        <img
+                          src={badge.icon}
+                          alt={badge.name}
+                          style={styles.badgeImage}
+                        />
+                      ) : (
+                        <div style={styles.badgePlaceholder}>🏅</div>
+                      )}
+
+                      <div style={styles.badgeContent}>
+                        <div style={styles.badgeName}>{badge.name}</div>
+                        <div style={styles.badgeDescription}>
+                          {badge.description || "Badge unlocked"}
+                        </div>
+                        <div style={styles.badgeEarnedAt}>
+                          Earned: {formatDate(badge.earned_at)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div style={styles.cardWide}>
@@ -774,6 +817,60 @@ const styles = {
     borderRadius: 8,
     marginBottom: 16,
     border: "1px solid rgba(34,197,94,0.25)",
+  },
+  badgesGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 16,
+  },
+  badgeCard: {
+    background: "#0f172a",
+    border: "1px solid #334155",
+    borderRadius: 12,
+    padding: 14,
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+  },
+  badgeImage: {
+    width: "100%",
+    height: 120,
+    objectFit: "contain",
+    borderRadius: 10,
+    background: "#111827",
+    border: "1px solid #334155",
+    padding: 10,
+    boxSizing: "border-box",
+  },
+  badgePlaceholder: {
+    width: "100%",
+    height: 120,
+    borderRadius: 10,
+    background: "#111827",
+    border: "1px solid #334155",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 40,
+  },
+  badgeContent: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  },
+  badgeName: {
+    fontWeight: 700,
+    fontSize: 16,
+  },
+  badgeDescription: {
+    opacity: 0.9,
+    lineHeight: 1.5,
+    fontSize: 14,
+  },
+  badgeEarnedAt: {
+    fontSize: 13,
+    color: "#cbd5e1",
+    opacity: 0.9,
   },
   backgroundGrid: {
     display: "grid",

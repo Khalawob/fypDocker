@@ -233,18 +233,19 @@ CREATE TABLE IF NOT EXISTS badges (
   code VARCHAR(64) NOT NULL UNIQUE,        -- e.g. "STREAK_7"
   name VARCHAR(80) NOT NULL,               -- e.g. "7-day streak"
   description VARCHAR(255) NULL,
-  icon VARCHAR(64) NULL,                   -- optional (frontend chooses icon)
+  icon VARCHAR(255) NULL,                   -- optional (frontend chooses icon)
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 
 -- Insert some default badges (Can be expanded later)
-INSERT INTO badges (code, name, description) VALUES
-('STREAK_1', '1-day streak', 'Log in 1 day in a row'),
-('STREAK_3', '3-day streak', 'Log in 3 days in a row'),
-('STREAK_7', '7-day streak', 'Log in 7 days in a row'),
-('STREAK_30', '30-day streak', 'Log in 30 days in a row')
-ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description);
+INSERT INTO badges (code, name, description, icon) VALUES
+('STREAK_1', '1-day streak', 'Log in 1 day in a row', NULL),
+('STREAK_3', '3-day streak', 'Log in 3 days in a row', NULL),
+('STREAK_7', '7-day streak', 'Log in 7 days in a row', NULL),
+('STREAK_30', '30-day streak', 'Log in 30 days in a row', NULL),
+('FIRST_SET', 'First Steps', 'Create your first flashcard set', '/Badges/Book.webp')
+ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), icon = VALUES(icon);
 
 
 CREATE TABLE IF NOT EXISTS user_badges (
