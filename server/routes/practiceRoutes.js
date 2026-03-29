@@ -318,6 +318,114 @@ function buildBlankPayload({
   return payload;
 }
 
+// Normalize strings for comparison: lowercase, trim, unify quotes/dashes, remove punctuation, collapse spaces (This is used to make answer checking more forgiving)
+function normalizeForFullSentence(s) {
+  return String(s ?? "")
+    .toLowerCase()
+    .trim()
+    .replace(/[’‘]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[–—]/g, "-")
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+// Levenshtein distance implementation for measuring string similarity (used in answer checking to allow minor typos)
+function levenshteinDistance(a, b) {
+  const s = String(a ?? "");
+  const t = String(b ?? "");
+
+  const m = s.length;
+  const n = t.length;
+
+  if (m === 0) return n;
+  if (n === 0) return m;
+
+  const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+
+  for (let i = 0; i <= m; i += 1) {
+    dp[i][0] = i;
+  }
+
+  for (let j = 0; j <= n; j += 1) {
+    dp[0][j] = j;
+  }
+
+  for (let i = 1; i <= m; i += 1) {
+    for (let j = 1; j <= n; j += 1) {
+      const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+
+  return dp[m][n];
+}
+
+
+// Calculate similarity ratio (0..1) based on Levenshtein distance and string lengths (used for answer checking)
+function similarityRatio(a, b) {
+  const s = String(a ?? "");
+  const t = String(b ?? "");
+  const maxLen = Math.max(s.length, t.length);
+
+  if (maxLen === 0) return 1;
+
+  const distance = levenshteinDistance(s, t);
+  return 1 - distance / maxLen;
+}
+
+// used to allow word order changes without penalty (e.g. "photosynthesis process" vs "process of photosynthesis")
+function tokenSortNormalize(s) {
+  return normalizeForFullSentence(s)
+    .split(" ")
+    .filter(Boolean)
+    .sort()
+    .join(" ");
+}
+
+// Hybrid answer checking: exact match, token-sorted match, and fuzzy match with thresholds based on length (used in HARD mode to determine if user's answer is correct)
+function isAnswerCorrectHybrid(userAnswer, correctAnswer) {
+  const normalizedUser = normalizeForFullSentence(userAnswer);
+  const normalizedCorrect = normalizeForFullSentence(correctAnswer);
+
+  if (!normalizedUser || !normalizedCorrect) {
+    return false;
+  }
+
+  if (normalizedUser === normalizedCorrect) {
+    return true;
+  }
+
+  if (tokenSortNormalize(normalizedUser) === tokenSortNormalize(normalizedCorrect)) {
+    return true;
+  }
+
+  const correctWords = normalizedCorrect.split(" ").filter(Boolean);
+  const userWords = normalizedUser.split(" ").filter(Boolean);
+
+  if (correctWords.length === 1 && userWords.length === 1) {
+    const distance = levenshteinDistance(normalizedUser, normalizedCorrect);
+    const maxLen = Math.max(normalizedUser.length, normalizedCorrect.length);
+
+    if (maxLen <= 4) return distance === 0;
+    if (maxLen <= 7) return distance <= 1;
+    return distance <= 2;
+  }
+
+  const ratio = similarityRatio(normalizedUser, normalizedCorrect);
+
+  if (correctWords.length <= 3) {
+    return ratio >= 0.9;
+  }
+
+  return ratio >= 0.85;
+}
+
 
 // Build a compact summary for the frontend end screen (with top 3 hardest cards)
 async function buildCompactSummary(completion, mode, totalCards, setId) {
@@ -1369,19 +1477,6 @@ router.post("/:sessionId/answer", requireAuth, async (req, res) => {
       }
     }
 
-    function normalizeForFullSentence(s) {
-  return String(s ?? "")
-    .toLowerCase()
-    .trim()
-    // normalize common unicode punctuation
-    .replace(/[’‘]/g, "'")
-    .replace(/[“”]/g, '"')
-    .replace(/[–—]/g, "-")
-    // remove punctuation (keep letters/numbers/space)
-    .replace(/[^\w\s]/g, "")
-    .replace(/\s+/g, " ");
-}
-
 
     // Enforce answering the current card (EASY)
     if (String(session.difficulty_mode) === "EASY") {
@@ -1413,8 +1508,7 @@ router.post("/:sessionId/answer", requireAuth, async (req, res) => {
 
 
     const correctAnswer = cardRows[0].answer; // Correct answer
-    const is_correct =
-      normalizeForFullSentence(user_answer) === normalizeForFullSentence(correctAnswer) ? 1 : 0;
+    const is_correct = isAnswerCorrectHybrid(user_answer, correctAnswer) ? 1 : 0;
 
 
     const attemptRows = await query(
