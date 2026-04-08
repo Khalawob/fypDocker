@@ -23,6 +23,28 @@ function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
+async function awardBadgeByCode(userId, code) {
+  const badgeRows = await query(
+    "SELECT badge_id FROM badges WHERE code = ? LIMIT 1",
+    [code]
+  );
+
+  if (badgeRows.length === 0) {
+    return false;
+  }
+
+  const badgeId = badgeRows[0].badge_id;
+
+  await query(
+    `INSERT INTO user_badges (user_id, badge_id)
+     VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE earned_at = earned_at`,
+    [userId, badgeId]
+  );
+
+  return true;
+}
+
 /**
  * COMPLETE SESSION ENGINE (REUSABLE)
  * Finalises a session and updates PER-USER difficulty in user_flashcard_stats
@@ -32,7 +54,17 @@ function clamp(n, min, max) {
 async function completeSessionForUser(sessionId, userId) {
   // 1) Ensure session belongs to user
   const sessionRows = await query(
-    "SELECT session_id, set_id, difficulty_mode FROM practice_session WHERE session_id = ? AND user_id = ?",
+    `SELECT
+       ps.session_id,
+       ps.set_id,
+       ps.difficulty_mode,
+       pset.use_adaptive_timing,
+       pset.use_adaptive_preview_timing,
+       pset.use_adaptive_answer_timing
+     FROM practice_session ps
+     LEFT JOIN practice_settings pset
+       ON pset.session_id = ps.session_id
+     WHERE ps.session_id = ? AND ps.user_id = ?`,
     [sessionId, userId]
   );
 
@@ -187,6 +219,48 @@ async function completeSessionForUser(sessionId, userId) {
     }
   } catch (schedulerErr) {
     console.error("Adaptive reminder scheduling error:", schedulerErr);
+  }
+
+  try {
+    if (finalScore === 100) {
+      await awardBadgeByCode(userId, "PERFECT_RECALL");
+    }
+
+    if (String(session.difficulty_mode).toUpperCase() === "EASY") {
+      await awardBadgeByCode(userId, "EASY_EXPLORER");
+    }
+
+    if (String(session.difficulty_mode).toUpperCase() === "MODERATE") {
+      await awardBadgeByCode(userId, "MODERATE_MASTER");
+    }
+
+    if (String(session.difficulty_mode).toUpperCase() === "HARD") {
+      await awardBadgeByCode(userId, "HARDCORE_HERO");
+    }
+
+    const adaptiveUsed =
+      Number(session.use_adaptive_timing) === 1 ||
+      Number(session.use_adaptive_preview_timing) === 1 ||
+      Number(session.use_adaptive_answer_timing) === 1;
+
+    if (adaptiveUsed) {
+      await awardBadgeByCode(userId, "ADAPTIVE_LEARNER");
+    }
+
+    const consistentRows = await query(
+      `SELECT COUNT(*) AS qualifying_count
+       FROM practice_session
+       WHERE user_id = ?
+         AND completed_at IS NOT NULL
+         AND final_score >= 80`,
+      [userId]
+    );
+
+    if (Number(consistentRows[0]?.qualifying_count || 0) >= 5) {
+      await awardBadgeByCode(userId, "CONSISTENT_ACCURACY");
+    }
+  } catch (badgeErr) {
+    console.error("Badge award error during session completion:", badgeErr);
   }
 
   // Return completion payload (used by endpoint + practice auto-complete)

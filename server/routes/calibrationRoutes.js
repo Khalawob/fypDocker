@@ -19,6 +19,28 @@ function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n)); // Clamp number
 }
 
+async function awardBadgeByCode(userId, code) {
+  const badgeRows = await query(
+    "SELECT badge_id FROM badges WHERE code = ? LIMIT 1",
+    [code]
+  );
+
+  if (badgeRows.length === 0) {
+    return false;
+  }
+
+  const badgeId = badgeRows[0].badge_id;
+
+  await query(
+    `INSERT INTO user_badges (user_id, badge_id)
+     VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE earned_at = earned_at`,
+    [userId, badgeId]
+  );
+
+  return true;
+}
+
 // Count words in a sentence (simple split)
 function countWords(text) {
   const s = String(text || "").trim(); // Ensure string and trim whitespace
@@ -89,6 +111,12 @@ router.post("/calibration/submit", requireAuth, async (req, res) => {
          calibrated_at = NOW()`,
       [req.user.userId, wordsPerSecond] // Params
     );
+
+    try {
+      await awardBadgeByCode(req.user.userId, "CALIBRATED_READER");
+    } catch (badgeErr) {
+      console.error("Calibration badge award error:", badgeErr);
+    }
 
     res.json({
       message: "Calibration saved", // Success message

@@ -385,35 +385,63 @@ export default function Profile() {
             </div>
 
             <div style={styles.cardWide}>
-              <h2 style={styles.sectionTitle}>Earned Badges</h2>
+              <h2 style={styles.sectionTitle}>Badges</h2>
 
               {badges.length === 0 ? (
-                <div style={styles.text}>No badges earned yet.</div>
+                <div style={styles.text}>No badges found.</div>
               ) : (
                 <div style={styles.badgesGrid}>
-                  {badges.map((badge) => (
-                    <div key={badge.badge_id} style={styles.badgeCard}>
-                      {badge.icon ? (
-                        <img
-                          src={badge.icon}
-                          alt={badge.name}
-                          style={styles.badgeImage}
-                        />
-                      ) : (
-                        <div style={styles.badgePlaceholder}>🏅</div>
-                      )}
+                  {badges.map((badge) => {
+                    const isEarned = Number(badge.is_earned) === 1;
 
-                      <div style={styles.badgeContent}>
-                        <div style={styles.badgeName}>{badge.name}</div>
-                        <div style={styles.badgeDescription}>
-                          {badge.description || "Badge unlocked"}
-                        </div>
-                        <div style={styles.badgeEarnedAt}>
-                          Earned: {formatDate(badge.earned_at)}
+                    return (
+                      <div
+                        key={badge.badge_id}
+                        style={{
+                          ...styles.badgeCard,
+                          opacity: isEarned ? 1 : 0.72,
+                          border: isEarned
+                            ? "1px solid rgba(34,197,94,0.35)"
+                            : "1px solid #334155",
+                        }}
+                      >
+                        {isEarned && badge.icon ? (
+                          <img
+                            src={badge.icon}
+                            alt={badge.name}
+                            style={styles.badgeImage}
+                          />
+                        ) : (
+                          <div style={styles.badgePlaceholder}>🔒</div>
+                        )}
+
+                        <div style={styles.badgeContent}>
+                          <div style={styles.badgeHeaderRow}>
+                            <div style={styles.badgeName}>{badge.name}</div>
+                            <span
+                              style={
+                                isEarned
+                                  ? styles.earnedBadgeStatus
+                                  : styles.lockedBadgeStatus
+                              }
+                            >
+                              {isEarned ? "Unlocked" : "Locked"}
+                            </span>
+                          </div>
+
+                          <div style={styles.badgeDescription}>
+                            {badge.description || "Complete the required challenge to unlock this badge."}
+                          </div>
+
+                          <div style={styles.badgeEarnedAt}>
+                            {isEarned
+                              ? `Earned: ${formatDate(badge.earned_at)}`
+                              : "Not unlocked yet"}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -858,6 +886,12 @@ const styles = {
     flexDirection: "column",
     gap: 6,
   },
+  badgeHeaderRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 10,
+  },
   badgeName: {
     fontWeight: 700,
     fontSize: 16,
@@ -871,6 +905,28 @@ const styles = {
     fontSize: 13,
     color: "#cbd5e1",
     opacity: 0.9,
+  },
+  earnedBadgeStatus: {
+    display: "inline-block",
+    padding: "6px 10px",
+    borderRadius: 999,
+    background: "rgba(34,197,94,0.2)",
+    color: "#bbf7d0",
+    fontSize: 12,
+    fontWeight: 700,
+    border: "1px solid rgba(34,197,94,0.35)",
+    whiteSpace: "nowrap",
+  },
+  lockedBadgeStatus: {
+    display: "inline-block",
+    padding: "6px 10px",
+    borderRadius: 999,
+    background: "rgba(148,163,184,0.15)",
+    color: "#cbd5e1",
+    fontSize: 12,
+    fontWeight: 700,
+    border: "1px solid rgba(148,163,184,0.25)",
+    whiteSpace: "nowrap",
   },
   backgroundGrid: {
     display: "grid",

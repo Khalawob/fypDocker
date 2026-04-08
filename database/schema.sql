@@ -244,8 +244,18 @@ INSERT INTO badges (code, name, description, icon) VALUES
 ('STREAK_3', '3-day streak', 'Log in 3 days in a row', NULL),
 ('STREAK_7', '7-day streak', 'Log in 7 days in a row', NULL),
 ('STREAK_30', '30-day streak', 'Log in 30 days in a row', NULL),
-('FIRST_SET', 'First Steps', 'Create your first flashcard set', '/Badges/Book.webp')
-ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), icon = VALUES(icon);
+('FIRST_SET', 'First Steps', 'Create your first flashcard set', '/Badges/Book.webp'),
+('PERFECT_RECALL', 'Perfect Recall', 'Complete a practice session with 100% accuracy', '/Badges/PerfectRecall.jpg'),
+('CONSISTENT_ACCURACY', 'Consistent Accuracy', 'Complete 5 practice sessions with at least 80% final score', '/Badges/ConsistentAccuracy.jpg'),
+('EASY_EXPLORER', 'Easy Explorer', 'Complete a practice session in EASY mode', '/Badges/EasyExplorer.jpg'),
+('MODERATE_MASTER', 'Moderate Master', 'Complete a practice session in MODERATE mode', '/Badges/ModerateMaster.jpg'),
+('HARDCORE_HERO', 'Hardcore Hero', 'Complete a practice session in HARD mode', '/Badges/HardcoreHero.png'),
+('CALIBRATED_READER', 'Calibrated Reader', 'Complete reading calibration for the first time', '/Badges/CalibratedReader.webp'),
+('ADAPTIVE_LEARNER', 'Adaptive Learner', 'Complete a practice session using adaptive timing', '/Badges/AdaptiveLearner.jpg')
+ON DUPLICATE KEY UPDATE
+  name = VALUES(name),
+  description = VALUES(description),
+  icon = VALUES(icon);
 
 
 CREATE TABLE IF NOT EXISTS user_badges (
@@ -350,3 +360,85 @@ CREATE TABLE IF NOT EXISTS user_backgrounds (
     FOREIGN KEY (background_id) REFERENCES backgrounds(background_id)
     ON DELETE CASCADE
 );
+
+
+-- TEST USER WITH EVERYTHING UNLOCKED
+
+-- password hash corresponds to "Roehampton"
+INSERT INTO users (user_id, username, email, password_hash)
+VALUES (
+  999,
+  'testuser',
+  'testuser@example.com',
+  '$2b$10$DJcAhiMaIRQ83eH16LRc/.vPoghzvMV304Va/J.ejm/L/qnZ0E3Zu'
+)
+ON DUPLICATE KEY UPDATE
+  username = VALUES(username),
+  email = VALUES(email),
+  password_hash = VALUES(password_hash);
+
+INSERT INTO user_profile (
+  user_id,
+  display_name,
+  bio,
+  avatar_url,
+  timezone,
+  study_goal_minutes_per_day,
+  preferred_difficulty,
+  current_streak,
+  longest_streak,
+  last_login_date,
+  selected_background_id
+)
+VALUES (
+  999,
+  'Test User',
+  'Fully unlocked test account',
+  NULL,
+  'Europe/London',
+  30,
+  'MODERATE',
+  30,
+  30,
+  CURDATE(),
+  NULL
+)
+ON DUPLICATE KEY UPDATE
+  display_name = VALUES(display_name),
+  bio = VALUES(bio),
+  avatar_url = VALUES(avatar_url),
+  timezone = VALUES(timezone),
+  study_goal_minutes_per_day = VALUES(study_goal_minutes_per_day),
+  preferred_difficulty = VALUES(preferred_difficulty),
+  current_streak = VALUES(current_streak),
+  longest_streak = VALUES(longest_streak),
+  last_login_date = VALUES(last_login_date);
+
+-- unlock every badge for the test user
+INSERT INTO user_badges (user_id, badge_id, earned_at)
+SELECT 999, b.badge_id, NOW()
+FROM badges b
+ON DUPLICATE KEY UPDATE
+  earned_at = user_badges.earned_at;
+
+-- unlock every background for the test user
+INSERT INTO user_backgrounds (user_id, background_id, unlocked_at)
+SELECT 999, bg.background_id, NOW()
+FROM backgrounds bg
+WHERE bg.is_active = 1
+ON DUPLICATE KEY UPDATE
+  unlocked_at = user_backgrounds.unlocked_at;
+
+-- set selected background to the first active background
+UPDATE user_profile
+SET selected_background_id = (
+  SELECT picked.background_id
+  FROM (
+    SELECT background_id
+    FROM backgrounds
+    WHERE is_active = 1
+    ORDER BY background_id ASC
+    LIMIT 1
+  ) AS picked
+)
+WHERE user_id = 999;

@@ -91,12 +91,16 @@ router.get("/me", requireAuth, async (req, res) => {
          b.name,
          b.description,
          b.icon,
-         ub.earned_at
-       FROM user_badges ub
-       INNER JOIN badges b
-         ON b.badge_id = ub.badge_id
-       WHERE ub.user_id = ?
-       ORDER BY ub.earned_at DESC, b.badge_id ASC`,
+         ub.earned_at,
+         CASE WHEN ub.badge_id IS NOT NULL THEN 1 ELSE 0 END AS is_earned
+       FROM badges b
+       LEFT JOIN user_badges ub
+         ON ub.badge_id = b.badge_id
+        AND ub.user_id = ?
+       ORDER BY
+         is_earned DESC,
+         ub.earned_at DESC,
+         b.badge_id ASC`,
       [userId]
     );
 
