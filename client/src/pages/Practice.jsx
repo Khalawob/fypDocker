@@ -9,13 +9,17 @@ const PROMPT_TYPES = {
     label: "Hidden Answer",
     description: "The full answer is hidden. You must recall it completely from memory.",
   },
-  ALL_BLANKS: {
-    label: "All Eligible Words",
-    description: "All eligible words are blanked based on the blank style you choose.",
+  ALL_BLANK_FIRST_LETTERS: {
+    label: "First Letter Clues",
+    description: "All important words are hidden but the first letter is shown as a clue.",
   },
   RANDOM_BLANKS: {
-    label: "Random Blanks",
-    description: "A selected proportion of eligible words are blanked.",
+    label: "Partial Blanks",
+    description: "Some key words are hidden with their first letters visible.",
+  },
+  RANDOM_FULL_BLANKS: {
+    label: "Random Blanks (No Clues)",
+    description: "Some words are removed completely with no letter hints.",
   },
   KEY_TERMS_ONLY: {
     label: "Key Terms Only",
@@ -33,16 +37,9 @@ const PROMPT_TYPES = {
     label: "Difficulty Levels",
     description: "The number of blanks depends on the difficulty level.",
   },
-};
-
-const BLANK_STYLES = {
-  FIRST_LETTER: {
-    label: "First Letter Hints",
-    description: "Show the first letter of each blanked word.",
-  },
-  FULL: {
-    label: "Full Blanks",
-    description: "Hide blanked words completely with no first-letter hints.",
+  ALL_FULL_BLANKS: {
+    label: "All Words Hidden",
+    description: "All eligible words are removed. No hints are shown.",
   },
 };
 
@@ -61,7 +58,6 @@ export default function Practice() {
     set_id: searchParams.get("set_id") || "",
     difficulty_mode: "EASY",
     prompt_type: "NORMAL_HIDDEN",
-    blank_style: "FIRST_LETTER",
     randomize_order: true,
     group_size: 5,
     answer_time_limit: 120,
@@ -116,29 +112,12 @@ export default function Practice() {
       : {}),
   };
 
-  const usesBlanking = form.prompt_type !== "NORMAL_HIDDEN";
-  const usesBlankRatio = ["RANDOM_BLANKS", "INCREASING_DIFFICULTY"].includes(
-    form.prompt_type
-  );
-
   function onChange(e) {
     const { name, value, type, checked } = e.target;
-    setForm((prev) => {
-      const next = {
-        ...prev,
-        [name]: type === "checkbox" ? checked : value,
-      };
-
-      if (name === "prompt_type" && value === "NORMAL_HIDDEN") {
-        next.blank_ratio = "";
-      }
-
-      if (name === "prompt_type" && !["RANDOM_BLANKS", "INCREASING_DIFFICULTY"].includes(value)) {
-        next.blank_ratio = "";
-      }
-
-      return next;
-    });
+    setForm((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
   }
 
   async function apiFetch(path, options = {}) {
@@ -282,7 +261,6 @@ export default function Practice() {
         set_id: Number(form.set_id),
         difficulty_mode: form.difficulty_mode,
         prompt_type: form.prompt_type,
-        blank_style: form.blank_style,
         randomize_order: !!form.randomize_order,
         group_size: Number(form.group_size),
         answer_time_limit: Number(form.answer_time_limit),
@@ -290,7 +268,7 @@ export default function Practice() {
         use_adaptive_timing: !!form.use_adaptive_timing,
       };
 
-      if (usesBlankRatio && form.blank_ratio !== "") {
+      if (form.blank_ratio !== "") {
         payload.blank_ratio = Number(form.blank_ratio);
       }
 
@@ -896,27 +874,6 @@ export default function Practice() {
                   {PROMPT_TYPES[form.prompt_type]?.description}
                 </div>
               </div>
-
-              {usesBlanking && (
-                <div>
-                  <label style={styles.label}>Blank Style</label>
-                  <select
-                    name="blank_style"
-                    value={form.blank_style}
-                    onChange={onChange}
-                    style={styles.input}
-                  >
-                    {Object.entries(BLANK_STYLES).map(([value, config]) => (
-                      <option key={value} value={value}>
-                        {config.label}
-                      </option>
-                    ))}
-                  </select>
-                  <div style={styles.helpText}>
-                    {BLANK_STYLES[form.blank_style]?.description}
-                  </div>
-                </div>
-              )}
             </div>
 
             <button
@@ -932,26 +889,24 @@ export default function Practice() {
                 <div style={styles.subsectionTitle}>Advanced Settings</div>
 
                 <div style={styles.grid}>
-                  {usesBlankRatio && (
-                    <div>
-                      <label style={styles.label}>Blank Ratio</label>
-                      <input
-                        name="blank_ratio"
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        max="1"
-                        value={form.blank_ratio}
-                        onChange={onChange}
-                        style={styles.input}
-                        placeholder="e.g. 0.4"
-                      />
-                      <div style={styles.helpText}>
-                        Controls how many words are hidden. Example: 0.4 means about 40% of
-                        eligible words are blanked.
-                      </div>
+                  <div>
+                    <label style={styles.label}>Blank Ratio</label>
+                    <input
+                      name="blank_ratio"
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="1"
+                      value={form.blank_ratio}
+                      onChange={onChange}
+                      style={styles.input}
+                      placeholder="e.g. 0.4"
+                    />
+                    <div style={styles.helpText}>
+                      Controls how many words are hidden. Example: 0.4 means about 40% of
+                      eligible words are blanked.
                     </div>
-                  )}
+                  </div>
 
                   <div>
                     <label style={styles.label}>Group Size</label>
@@ -1029,6 +984,45 @@ export default function Practice() {
                 </div>
               </div>
             )}
+
+            <div style={styles.explainerCard}>
+              <h3 style={styles.explainerTitle}>How Practice Works</h3>
+
+              <div style={styles.explainerGrid}>
+                <div style={styles.explainerBlock}>
+                  <div style={styles.explainerStep}>1. Preview Phase</div>
+                  <p style={styles.explainerText}>
+                    You first see the flashcard question and answer so you can study it.
+                    This helps you prepare before being tested.
+                  </p>
+                </div>
+
+                <div style={styles.explainerBlock}>
+                  <div style={styles.explainerStep}>2. Test Phase</div>
+                  <p style={styles.explainerText}>
+                    After previewing, you move into the test phase where you must recall
+                    the answer from memory. Depending on your prompt settings, the answer
+                    may be hidden or shown with blanks.
+                  </p>
+                </div>
+
+                <div style={styles.explainerBlock}>
+                  <div style={styles.explainerStep}>3. Timed Practice</div>
+                  <p style={styles.explainerText}>
+                    Some cards continue automatically when the timer ends. In test mode,
+                    your answer may be submitted automatically if time runs out.
+                  </p>
+                </div>
+
+                <div style={styles.explainerBlock}>
+                  <div style={styles.explainerStep}>4. Feedback</div>
+                  <p style={styles.explainerText}>
+                    After each answer, you receive feedback and can continue to the next
+                    card. At the end, you will see a session summary.
+                  </p>
+                </div>
+              </div>
+            </div>
 
             <button
               type="submit"
@@ -1137,21 +1131,20 @@ export default function Practice() {
                           {currentCard.blanked_text}
                         </div>
 
-                        {currentCard.blank_style === "FIRST_LETTER" &&
-                          currentCard.first_letter_clues && (
-                            <>
-                              <div style={themedAnswerLabelStyle}>Clues</div>
-                              <div
-                                style={styles.noCopyText}
-                                onCopy={(e) => e.preventDefault()}
-                                onCut={(e) => e.preventDefault()}
-                                onContextMenu={(e) => e.preventDefault()}
-                                onDragStart={(e) => e.preventDefault()}
-                              >
-                                {currentCard.first_letter_clues}
-                              </div>
-                            </>
-                          )}
+                        {currentCard.first_letter_clues && (
+                          <>
+                            <div style={themedAnswerLabelStyle}>Clues</div>
+                            <div
+                              style={styles.noCopyText}
+                              onCopy={(e) => e.preventDefault()}
+                              onCut={(e) => e.preventDefault()}
+                              onContextMenu={(e) => e.preventDefault()}
+                              onDragStart={(e) => e.preventDefault()}
+                            >
+                              {currentCard.first_letter_clues}
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
 
@@ -1395,7 +1388,7 @@ export default function Practice() {
                             {card.question || `Flashcard ${card.flashcard_id}`}
                           </div>
                           <div style={styles.hardestRating}>
-                            Difficulty: {card.difficulty_rating}
+                            Difficulty: {Number(card.difficulty_rating).toFixed(1)}
                           </div>
                         </div>
                       ))}
@@ -1540,6 +1533,41 @@ const styles = {
     borderRadius: 14,
     marginBottom: 20,
     boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+  },
+  explainerCard: {
+    marginTop: 20,
+    marginBottom: 8,
+    padding: 20,
+    borderRadius: 12,
+    background: "#0f172a",
+    border: "1px solid #23304c",
+  },
+  explainerTitle: {
+    marginTop: 0,
+    marginBottom: 16,
+    fontSize: 20,
+  },
+  explainerGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 14,
+  },
+  explainerBlock: {
+    background: "#111827",
+    border: "1px solid #334155",
+    borderRadius: 10,
+    padding: 14,
+  },
+  explainerStep: {
+    fontWeight: 700,
+    marginBottom: 8,
+    color: "#93c5fd",
+  },
+  explainerText: {
+    margin: 0,
+    lineHeight: 1.6,
+    opacity: 0.92,
+    fontSize: 14,
   },
   practiceSessionArea: {
     display: "flex",
