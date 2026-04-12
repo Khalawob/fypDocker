@@ -110,7 +110,7 @@ io.on("connection", (socket) => {
   });
 });
 
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 startReminderJob();
 
 server.listen(PORT, "0.0.0.0", () => {
