@@ -9,17 +9,13 @@ const PROMPT_TYPES = {
     label: "Hidden Answer",
     description: "The full answer is hidden. You must recall it completely from memory.",
   },
-  ALL_BLANK_FIRST_LETTERS: {
-    label: "First Letter Clues",
-    description: "All important words are hidden but the first letter is shown as a clue.",
+  ALL_BLANKS: {
+    label: "All Important Words Blanked",
+    description: "All eligible words are hidden. Use blank style to choose hints or full blanks.",
   },
   RANDOM_BLANKS: {
     label: "Partial Blanks",
-    description: "Some key words are hidden with their first letters visible.",
-  },
-  RANDOM_FULL_BLANKS: {
-    label: "Random Blanks (No Clues)",
-    description: "Some words are removed completely with no letter hints.",
+    description: "Some eligible words are hidden. Use blank style to choose hints or full blanks.",
   },
   KEY_TERMS_ONLY: {
     label: "Key Terms Only",
@@ -36,10 +32,6 @@ const PROMPT_TYPES = {
   DIFFICULTY_LEVEL_BLANKS: {
     label: "Difficulty Levels",
     description: "The number of blanks depends on the difficulty level.",
-  },
-  ALL_FULL_BLANKS: {
-    label: "All Words Hidden",
-    description: "All eligible words are removed. No hints are shown.",
   },
 };
 
@@ -58,6 +50,7 @@ export default function Practice() {
     set_id: searchParams.get("set_id") || "",
     difficulty_mode: "EASY",
     prompt_type: "NORMAL_HIDDEN",
+    blank_style: "FIRST_LETTER",
     randomize_order: true,
     group_size: 5,
     answer_time_limit: 120,
@@ -261,6 +254,7 @@ export default function Practice() {
         set_id: Number(form.set_id),
         difficulty_mode: form.difficulty_mode,
         prompt_type: form.prompt_type,
+        blank_style: form.blank_style,
         randomize_order: !!form.randomize_order,
         group_size: Number(form.group_size),
         answer_time_limit: Number(form.answer_time_limit),
@@ -465,6 +459,11 @@ export default function Practice() {
       border_radius: selectedSet?.border_radius || DEFAULT_THEME.border_radius,
     };
   }, [availableSets, form.set_id]);
+
+  const shouldShowBlankStyle = form.prompt_type !== "NORMAL_HIDDEN";
+  const shouldShowBlankRatio =
+    form.prompt_type === "RANDOM_BLANKS" ||
+    form.prompt_type === "INCREASING_DIFFICULTY";
 
   function getTimerColor() {
     if (timerSeconds === null || !timerMaxSeconds) return "#22c55e";
@@ -874,6 +873,24 @@ export default function Practice() {
                   {PROMPT_TYPES[form.prompt_type]?.description}
                 </div>
               </div>
+
+              {shouldShowBlankStyle && (
+                <div>
+                  <label style={styles.label}>Blank Style</label>
+                  <select
+                    name="blank_style"
+                    value={form.blank_style}
+                    onChange={onChange}
+                    style={styles.input}
+                  >
+                    <option value="FIRST_LETTER">First Letter Hints</option>
+                    <option value="FULL">Fully Blanked</option>
+                  </select>
+                  <div style={styles.helpText}>
+                    Choose whether hidden words show their first letter or are completely blanked.
+                  </div>
+                </div>
+              )}
             </div>
 
             <button
@@ -889,24 +906,26 @@ export default function Practice() {
                 <div style={styles.subsectionTitle}>Advanced Settings</div>
 
                 <div style={styles.grid}>
-                  <div>
-                    <label style={styles.label}>Blank Ratio</label>
-                    <input
-                      name="blank_ratio"
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      max="1"
-                      value={form.blank_ratio}
-                      onChange={onChange}
-                      style={styles.input}
-                      placeholder="e.g. 0.4"
-                    />
-                    <div style={styles.helpText}>
-                      Controls how many words are hidden. Example: 0.4 means about 40% of
-                      eligible words are blanked.
+                  {shouldShowBlankRatio && (
+                    <div>
+                      <label style={styles.label}>Blank Ratio</label>
+                      <input
+                        name="blank_ratio"
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        max="1"
+                        value={form.blank_ratio}
+                        onChange={onChange}
+                        style={styles.input}
+                        placeholder="e.g. 0.4"
+                      />
+                      <div style={styles.helpText}>
+                        Controls how many words are hidden. Example: 0.4 means about 40% of
+                        eligible words are blanked.
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   <div>
                     <label style={styles.label}>Group Size</label>

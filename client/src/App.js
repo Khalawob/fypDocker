@@ -15,6 +15,10 @@ import Calibration from "./pages/Calibration";
 import Home from "./pages/Home";
 import NotFound from "./pages/NotFound";
 import ImportDocument from "./pages/ImportDocument";
+import MultiplayerHome from "./pages/MultiplayerHome";
+import CreateMultiplayerRoom from "./pages/CreateMultiplayerRoom";
+import JoinMultiplayerRoom from "./pages/JoinMultiplayerRoom";
+import MultiplayerRoom from "./pages/MultiplayerRoom";
 
 function App() {
   return (
@@ -35,12 +39,16 @@ function App() {
           <Route path="/about" element={<About />} />
           <Route path="/calibration" element={<Calibration />} />
           <Route path="/sets/:setId/import-document" element={<ImportDocument />} />
+          <Route path="/multiplayer" element={<MultiplayerHome />} />
+          <Route path="/multiplayer/create" element={<CreateMultiplayerRoom />} />
+          <Route path="/multiplayer/join" element={<JoinMultiplayerRoom />} />
+          <Route path="/multiplayer/join/:joinCode" element={<JoinMultiplayerRoom />} />
+          <Route path="/multiplayer/room/:joinCode" element={<MultiplayerRoom />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
     </BackgroundProvider>
   );
 }
-
 
 export default App;

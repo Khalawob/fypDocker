@@ -1,6 +1,9 @@
 const express = require("express");                 // Import Express
 const cors = require("cors");                      // Enable CORS
 const db = require("./db");                        // MySQL connection
+const http = require("http");
+const jwt = require("jsonwebtoken");              // JWT for authentication
+const { Server } = require("socket.io");
 
 // Route imports
 const authRoutes = require("./routes/authRoutes");           // Auth routes
@@ -16,53 +19,38 @@ const { startReminderJob } = require("./jobs/reminderJob"); // Reminder job
 const documentImportRoutes = require("./routes/documentImportRoutes");
 const documentTextRoutes = require("./routes/documentTextRoutes");
 const backgroundRoutes = require("./routes/backgroundRoutes");
+const multiplayerRoutes = require("./routes/multiplayerRoutes");
 
 
-const app = express();  // Create Express app
+const app = express();
+const server = http.createServer(app);
 
-app.use(cors());    // Enable CORS middleware
-app.use(express.json());  // Parse JSON bodies
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
+});
 
-// ROUTES 
+app.set("io", io);
 
-// Auth
+app.use(cors());
+app.use(express.json());
+
+// ROUTES
 app.use("/api/auth", authRoutes);
-
-// Flashcard sets
 app.use("/api/sets", setRoutes);
-
-// Flashcards
 app.use("/api", flashcardRoutes);
-
-// NLP variations
 app.use("/api", variationRoutes);
-
-// Session routes
 app.use("/api", sessionRoutes);
-
-// Practice routes
 app.use("/api/practice", practiceRoutes);
-
-// Calibration route for testing reading speed and timing
 app.use("/api", calibrationRoutes);
-
-// User profile routes
 app.use("/api/profile", profileRoutes);
-
-// Set review reminder routes
 app.use("/api/sets", setReminderRoutes);
-
-// Document import route
 app.use("/api", documentImportRoutes);
-
-// document text route
 app.use("/api", documentTextRoutes);
-
-// Background routes
 app.use("/api/backgrounds", backgroundRoutes);
-
-
-// End points for tests
+app.use("/api/multiplayer", multiplayerRoutes);
 
 app.get("/", (req, res) => {
   res.send("Flashcard API running");
@@ -77,11 +65,55 @@ app.get("/test-db", (req, res) => {
   });
 });
 
-//START SERVER
+// SOCKET AUTH
+io.use((socket, next) => {
+  try {
+    const raw =
+      socket.handshake.auth?.token ||
+      socket.handshake.headers?.authorization ||
+      "";
+
+    let token = String(raw).trim();
+
+    if (token.startsWith("Bearer ")) {
+      token = token.slice(7).trim();
+    }
+
+    if (!token) {
+      return next(new Error("Authentication token missing"));
+    }
+
+    const payload = jwt.verify(token, process.env.JWT_SECRET || "dev_secret");
+
+    socket.user = {
+      userId: payload.userId,
+    };
+
+    next();
+  } catch (err) {
+    return next(new Error("Authentication failed"));
+  }
+});
+
+io.on("connection", (socket) => {
+  const personalRoom = `user:${socket.user.userId}`;
+  socket.join(personalRoom);
+
+  socket.on("room:join", ({ joinCode }) => {
+    if (!joinCode) return;
+    socket.join(`room:${String(joinCode).toUpperCase()}`);
+  });
+
+  socket.on("room:leave", ({ joinCode }) => {
+    if (!joinCode) return;
+    socket.leave(`room:${String(joinCode).toUpperCase()}`);
+  });
+});
 
 const PORT = 5000;
-startReminderJob(); // Start the reminder job when the server starts
-app.listen(PORT, () => {
+startReminderJob();
+
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
 

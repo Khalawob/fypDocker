@@ -361,6 +361,125 @@ CREATE TABLE IF NOT EXISTS user_backgrounds (
     ON DELETE CASCADE
 );
 
+-- ------------------------------------------------------------
+-- MULTIPLAYER ROOM
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS multiplayer_room (
+  room_id INT AUTO_INCREMENT PRIMARY KEY,
+  host_user_id INT NOT NULL,
+  set_id INT NOT NULL,
+  join_code VARCHAR(12) NOT NULL UNIQUE,
+  title VARCHAR(120) NULL,
+
+  difficulty_mode VARCHAR(20) NOT NULL DEFAULT 'EASY',
+  prompt_type VARCHAR(50) NOT NULL DEFAULT 'NORMAL_HIDDEN',
+
+  display_time_per_card INT NOT NULL DEFAULT 10,
+  answer_time_limit INT NOT NULL DEFAULT 120,
+  group_size INT NOT NULL DEFAULT 5,
+  randomize_order TINYINT(1) NOT NULL DEFAULT 1,
+
+  blank_style VARCHAR(30) NOT NULL DEFAULT 'FIRST_LETTER',
+  blank_ratio FLOAT NULL,
+  seed INT NULL,
+
+  card_order_json LONGTEXT NULL,
+
+  easy_phase VARCHAR(10) NULL DEFAULT 'PREVIEW',
+  easy_index INT NOT NULL DEFAULT 0,
+
+  moderate_phase VARCHAR(12) NULL DEFAULT 'PREVIEW',
+  moderate_group_index INT NOT NULL DEFAULT 0,
+  moderate_preview_index INT NOT NULL DEFAULT 0,
+  moderate_test_index INT NOT NULL DEFAULT 0,
+
+  hard_phase VARCHAR(10) NOT NULL DEFAULT 'PREVIEW',
+  hard_preview_index INT NOT NULL DEFAULT 0,
+  hard_queue LONGTEXT NULL,
+
+  current_card_index INT NOT NULL DEFAULT 0,
+  status VARCHAR(20) NOT NULL DEFAULT 'LOBBY',
+  phase VARCHAR(20) NOT NULL DEFAULT 'LOBBY',
+  phase_ends_at DATETIME NULL,
+
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  started_at DATETIME NULL,
+  finished_at DATETIME NULL,
+
+  CONSTRAINT fk_multiplayer_room_host
+    FOREIGN KEY (host_user_id) REFERENCES users(user_id)
+    ON DELETE CASCADE,
+
+  CONSTRAINT fk_multiplayer_room_set
+    FOREIGN KEY (set_id) REFERENCES flashcard_set(set_id)
+    ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE INDEX idx_multiplayer_room_host ON multiplayer_room(host_user_id);
+CREATE INDEX idx_multiplayer_room_set ON multiplayer_room(set_id);
+CREATE INDEX idx_multiplayer_room_code ON multiplayer_room(join_code);
+
+-- ------------------------------------------------------------
+-- MULTIPLAYER PARTICIPANT
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS multiplayer_participant (
+  participant_id INT AUTO_INCREMENT PRIMARY KEY,
+  room_id INT NOT NULL,
+  user_id INT NULL,
+  display_name VARCHAR(80) NOT NULL,
+
+  score INT NOT NULL DEFAULT 0,
+
+  joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+  is_host TINYINT(1) NOT NULL DEFAULT 0,
+  is_playing TINYINT(1) NOT NULL DEFAULT 1,
+  is_connected TINYINT(1) NOT NULL DEFAULT 1,
+
+  CONSTRAINT fk_multiplayer_participant_room
+    FOREIGN KEY (room_id) REFERENCES multiplayer_room(room_id)
+    ON DELETE CASCADE,
+
+  CONSTRAINT fk_multiplayer_participant_user
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+    ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE INDEX idx_multiplayer_participant_room ON multiplayer_participant(room_id);
+CREATE INDEX idx_multiplayer_participant_user ON multiplayer_participant(user_id);
+
+-- ------------------------------------------------------------
+-- MULTIPLAYER ANSWER
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS multiplayer_answer (
+  answer_id INT AUTO_INCREMENT PRIMARY KEY,
+  room_id INT NOT NULL,
+  participant_id INT NOT NULL,
+  flashcard_id INT NOT NULL,
+
+  user_answer TEXT NULL,
+  is_correct TINYINT(1) NOT NULL DEFAULT 0,
+  time_taken INT NULL,
+  submitted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+  CONSTRAINT fk_multiplayer_answer_room
+    FOREIGN KEY (room_id) REFERENCES multiplayer_room(room_id)
+    ON DELETE CASCADE,
+
+  CONSTRAINT fk_multiplayer_answer_participant
+    FOREIGN KEY (participant_id) REFERENCES multiplayer_participant(participant_id)
+    ON DELETE CASCADE,
+
+  CONSTRAINT fk_multiplayer_answer_flashcard
+    FOREIGN KEY (flashcard_id) REFERENCES flashcard(flashcard_id)
+    ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE INDEX idx_multiplayer_answer_room ON multiplayer_answer(room_id);
+CREATE INDEX idx_multiplayer_answer_participant ON multiplayer_answer(participant_id);
+CREATE INDEX idx_multiplayer_answer_flashcard ON multiplayer_answer(flashcard_id);
+CREATE INDEX idx_multiplayer_answer_room_flashcard ON multiplayer_answer(room_id, flashcard_id);
 
 -- TEST USER WITH EVERYTHING UNLOCKED
 

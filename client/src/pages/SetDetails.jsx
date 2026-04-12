@@ -91,12 +91,14 @@ export default function SetDetails() {
         setNextReviewAt(reminderData.next_review_at || null);
         setLastSentAt(reminderData.last_sent_at || null);
         setLastAccuracy(
-          reminderData.last_accuracy !== null && reminderData.last_accuracy !== undefined
+          reminderData.last_accuracy !== null &&
+            reminderData.last_accuracy !== undefined
             ? Number(reminderData.last_accuracy)
             : null
         );
         setLastIntervalHours(
-          reminderData.last_interval_hours !== null && reminderData.last_interval_hours !== undefined
+          reminderData.last_interval_hours !== null &&
+            reminderData.last_interval_hours !== undefined
             ? Number(reminderData.last_interval_hours)
             : null
         );
@@ -252,12 +254,6 @@ export default function SetDetails() {
     opacity: 1,
   };
 
-  const metaStyle = {
-    ...styles.cardMeta,
-    color: theme.text_color,
-    opacity: 0.75,
-  };
-
   const practiceButtonStyle = {
     ...styles.primaryButton,
     backgroundColor: "#22c55e",
@@ -279,14 +275,19 @@ export default function SetDetails() {
     border: "none",
   };
 
+  const multiplayerButtonStyle = {
+    ...styles.primaryButtonLink,
+    backgroundColor: "#a855f7",
+    color: "#ffffff",
+    border: "none",
+  };
+
   return (
     <div style={pageStyle}>
       <div style={styles.container}>
         <div style={styles.headerRow}>
           <div>
-            <h1 style={styles.title}>
-              {setInfo?.title || "Flashcard Set"}
-            </h1>
+            <h1 style={styles.title}>{setInfo?.title || "Flashcard Set"}</h1>
             <p style={styles.subtitle}>
               {setInfo?.description || "View and manage flashcards in this set."}
             </p>
@@ -301,12 +302,25 @@ export default function SetDetails() {
               Edit Set
             </Link>
 
-            <Link to={`/sets/${setId}/add-flashcard`} style={addFlashcardButtonStyle}>
+            <Link
+              to={`/sets/${setId}/add-flashcard`}
+              style={addFlashcardButtonStyle}
+            >
               Add Flashcard
             </Link>
 
-            <Link to={`/sets/${setId}/import-document`} style={importButtonStyle}>
+            <Link
+              to={`/sets/${setId}/import-document`}
+              style={importButtonStyle}
+            >
               Import Document
+            </Link>
+
+            <Link
+              to={`/multiplayer/create?set_id=${setId}`}
+              style={multiplayerButtonStyle}
+            >
+              Host Multiplayer
             </Link>
 
             <button style={practiceButtonStyle} onClick={startPractice}>
@@ -327,7 +341,8 @@ export default function SetDetails() {
           <div style={styles.reminderCard}>
             <h3 style={styles.reminderTitle}>Study Reminder</h3>
             <p style={styles.reminderText}>
-              Choose whether this set uses a manual review interval or adaptive review timing.
+              Choose whether this set uses a manual review interval or adaptive
+              review timing.
             </p>
 
             <label style={styles.checkboxRow}>
@@ -366,7 +381,8 @@ export default function SetDetails() {
 
             <div style={styles.reminderMeta}>
               <div>
-                <strong>Reminder mode:</strong> {adaptiveEnabled ? "Adaptive" : "Manual"}
+                <strong>Reminder mode:</strong>{" "}
+                {adaptiveEnabled ? "Adaptive" : "Manual"}
               </div>
               <div>
                 <strong>Next review:</strong> {formatDateTime(nextReviewAt)}
@@ -376,11 +392,15 @@ export default function SetDetails() {
               </div>
               <div>
                 <strong>Last recorded accuracy:</strong>{" "}
-                {lastAccuracy !== null ? `${Math.round(lastAccuracy * 100)}%` : "Not available yet"}
+                {lastAccuracy !== null
+                  ? `${Math.round(lastAccuracy * 100)}%`
+                  : "Not available yet"}
               </div>
               <div>
                 <strong>Last interval used by system:</strong>{" "}
-                {lastIntervalHours !== null ? `${lastIntervalHours} hours` : "Not available yet"}
+                {lastIntervalHours !== null
+                  ? `${lastIntervalHours} hours`
+                  : "Not available yet"}
               </div>
             </div>
 
@@ -404,7 +424,10 @@ export default function SetDetails() {
               </p>
             </div>
             <div style={bottomHalfStyle}>
-              <Link to={`/sets/${setId}/add-flashcard`} style={addFlashcardButtonStyle}>
+              <Link
+                to={`/sets/${setId}/add-flashcard`}
+                style={addFlashcardButtonStyle}
+              >
                 Add First Flashcard
               </Link>
             </div>
@@ -504,11 +527,6 @@ const styles = {
   },
   bottomHalf: {
     padding: 20,
-  },
-  cardMeta: {
-    fontSize: 13,
-    opacity: 0.8,
-    marginBottom: 16,
   },
   block: {
     marginBottom: 16,
