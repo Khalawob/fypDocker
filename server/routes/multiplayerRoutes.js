@@ -1,12 +1,19 @@
-const express = require("express");
-const axios = require("axios");
-const db = require("../db");
-const { requireAuth } = require("../middleware/auth");
+const express = require("express"); // Express framework for defining API routes
+const axios = require("axios"); // Used to call the Flask NLP microservice for blanked prompts
+const db = require("../db"); // Shared MySQL database connection
+const { requireAuth } = require("../middleware/auth"); // Middleware that ensures the user is logged in
 
-const router = express.Router();
+const router = express.Router(); // Router instance exported at the end of the file
+
+// In-memory map of active timers, keyed by join code.
+// This lets the server control timed phase changes for each room independently.
 const roomTimers = new Map();
+
+// Number of seconds the shared RESULT phase is shown before moving on.
 const RESULT_SECONDS = 3;
 
+// Small Promise wrapper around db.query so the route file can use async/await
+// instead of nested callback functions for SQL queries.
 function query(sql, params = []) {
   return new Promise((resolve, reject) => {
     db.query(sql, params, (err, results) => {
@@ -16,6 +23,8 @@ function query(sql, params = []) {
   });
 }
 
+// Safely parse JSON values stored in database columns such as card_order_json
+// and hard_queue. If parsing fails, return a fallback value instead of crashing.
 function safeJsonParse(value, fallback) {
   try {
     return value ? JSON.parse(value) : fallback;
@@ -24,9 +33,16 @@ function safeJsonParse(value, fallback) {
   }
 }
 
-// -----------------------------
-// Answer checking (matches solo)
-// -----------------------------
+
+// Answer checking (matches solo Mode logic)
+
+// Normalises text before comparing answers.
+// This makes answer checking more forgiving by:
+// - converting to lowercase
+// - trimming spaces
+// - standardising quotes/dashes
+// - removing punctuation
+// - collapsing repeated spaces
 function normalizeForFullSentence(s) {
   return String(s ?? "")
     .toLowerCase()
@@ -38,6 +54,9 @@ function normalizeForFullSentence(s) {
     .replace(/\s+/g, " ");
 }
 
+// Standard Levenshtein distance algorithm.
+// Measures how many single-character edits are needed to transform one string
+// into another. Used later for typo-tolerant answer matching.
 function levenshteinDistance(a, b) {
   const s = String(a ?? "");
   const t = String(b ?? "");
@@ -67,6 +86,8 @@ function levenshteinDistance(a, b) {
   return dp[m][n];
 }
 
+// Converts the Levenshtein distance into a similarity ratio from 0 to 1,
+// where 1 means identical strings.
 function similarityRatio(a, b) {
   const s = String(a ?? "");
   const t = String(b ?? "");
@@ -78,6 +99,8 @@ function similarityRatio(a, b) {
   return 1 - distance / maxLen;
 }
 
+// Sorts words alphabetically after normalisation.
+// This helps accept answers where the same words are used but in a different order.
 function tokenSortNormalize(s) {
   return normalizeForFullSentence(s)
     .split(" ")
@@ -86,6 +109,15 @@ function tokenSortNormalize(s) {
     .join(" ");
 }
 
+// Hybrid answer checker used for multiplayer marking.
+// It accepts:
+// - exact normalised matches
+// - token-sorted matches
+// - small typo differences for one-word answers
+// - similarity-based matches for longer phrases/sentences
+//
+// This mirrors the same forgiving behaviour as the solo practice mode
+// so answer marking stays consistent across both systems.
 function isAnswerCorrectHybrid(userAnswer, correctAnswer) {
   const normalizedUser = normalizeForFullSentence(userAnswer);
   const normalizedCorrect = normalizeForFullSentence(correctAnswer);
@@ -105,6 +137,7 @@ function isAnswerCorrectHybrid(userAnswer, correctAnswer) {
   const correctWords = normalizedCorrect.split(" ").filter(Boolean);
   const userWords = normalizedUser.split(" ").filter(Boolean);
 
+  // For single-word answers, use stricter typo logic based on word length.
   if (correctWords.length === 1 && userWords.length === 1) {
     const distance = levenshteinDistance(normalizedUser, normalizedCorrect);
     const maxLen = Math.max(normalizedUser.length, normalizedCorrect.length);
@@ -114,15 +147,19 @@ function isAnswerCorrectHybrid(userAnswer, correctAnswer) {
     return distance <= 2;
   }
 
+  // For short phrases, use a higher similarity threshold.
   const ratio = similarityRatio(normalizedUser, normalizedCorrect);
 
   if (correctWords.length <= 3) {
     return ratio >= 0.9;
   }
 
+  // For longer answers, allow a slightly lower threshold.
   return ratio >= 0.85;
 }
 
+// Generates a readable room join code using letters/numbers that avoid
+// ambiguous characters like 0/O and 1/I.
 function randomJoinCode(length = 6) {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let out = "";
@@ -132,6 +169,8 @@ function randomJoinCode(length = 6) {
   return out;
 }
 
+// Tries up to 20 times to generate a unique join code that does not already
+// exist in the multiplayer_room table.
 async function generateUniqueJoinCode() {
   for (let i = 0; i < 20; i += 1) {
     const code = randomJoinCode(6);
@@ -144,6 +183,8 @@ async function generateUniqueJoinCode() {
   throw new Error("Failed to generate unique join code");
 }
 
+// Clears and removes any existing timer for a room.
+// This prevents overlapping timers when a room phase changes early.
 function clearRoomTimer(joinCode) {
   const key = String(joinCode).toUpperCase();
   const existing = roomTimers.get(key);
@@ -153,6 +194,9 @@ function clearRoomTimer(joinCode) {
   }
 }
 
+// Sets a timer for a room phase.
+// Only one timer is allowed per room, so any previous one is cleared first.
+// When the timer finishes, the provided async callback runs.
 function setRoomTimer(joinCode, fn, ms) {
   clearRoomTimer(joinCode);
   const key = String(joinCode).toUpperCase();
@@ -167,17 +211,24 @@ function setRoomTimer(joinCode, fn, ms) {
   roomTimers.set(key, timer);
 }
 
+// Computes the number of whole seconds remaining until a given date/time.
+// Used so the frontend can show countdown timers.
 function secondsUntil(dateValue) {
   if (!dateValue) return null;
   const endsAt = new Date(dateValue).getTime();
   return Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
 }
 
+// Simple deterministic pseudo-random generator based on a numeric seed.
+// This is used so shuffled card order can be consistent across all players.
 function seededRandom(seed) {
   const x = Math.sin(seed) * 10000;
   return x - Math.floor(x);
 }
 
+// Deterministic shuffle function.
+// Given the same array and seed, it always returns the same shuffled order.
+// This ensures every player sees the same room-wide card sequence.
 function seededShuffle(arr, seed) {
   const copy = [...arr];
   let s = Number(seed) || 1;
@@ -189,6 +240,9 @@ function seededShuffle(arr, seed) {
   return copy;
 }
 
+// Normalises incoming prompt type values from the frontend.
+// Also maps older/special aliases into the internal prompt types used
+// throughout multiplayer.
 function normalizePromptType(promptType) {
   const raw = String(promptType || "NORMAL_HIDDEN").trim().toUpperCase();
 
@@ -209,6 +263,9 @@ function normalizePromptType(promptType) {
   return allowed.has(raw) ? raw : "NORMAL_HIDDEN";
 }
 
+// Normalises blank style separately from prompt type.
+// If the frontend does not explicitly send FULL/FIRST_LETTER,
+// this function derives the correct style from the chosen prompt type.
 function normalizeBlankStyle(blankStyle, promptType) {
   const rawStyle = String(blankStyle || "").trim().toUpperCase();
   const rawPromptType = String(promptType || "").trim().toUpperCase();
@@ -224,6 +281,8 @@ function normalizeBlankStyle(blankStyle, promptType) {
   return "FIRST_LETTER";
 }
 
+// Converts internal multiplayer prompt types into the variation_type value
+// expected by the Flask NLP service.
 function mapPromptTypeToVariationType(promptType) {
   const pt = normalizePromptType(promptType);
 
@@ -231,6 +290,9 @@ function mapPromptTypeToVariationType(promptType) {
   return pt;
 }
 
+// Builds the request payload sent to the Flask NLP service.
+// This centralises how answer text, prompt type, blank style, blank ratio,
+// and seed are packaged together.
 function buildBlankPayload({
   answerText,
   promptType,
@@ -249,6 +311,8 @@ function buildBlankPayload({
   };
 }
 
+// Converts a flashcard's stored difficulty rating into difficulty levels 1-4.
+// This is used for the DIFFICULTY_LEVEL_BLANKS NLP mode.
 async function getDifficultyLevelForCard(flashcardId) {
   const rows = await query(
     `SELECT COALESCE(difficulty_rating, 0) AS difficulty_rating
@@ -270,6 +334,10 @@ async function getDifficultyLevelForCard(flashcardId) {
   return difficulty_level;
 }
 
+// Generates the test prompt for a single card in a multiplayer room.
+// If prompt_type is NORMAL_HIDDEN, no NLP call is needed.
+// Otherwise this function calls the Flask NLP service to generate blanked text
+// and optional first-letter clues for the answer.
 async function generatePromptForCard({
   room,
   card,
@@ -279,6 +347,7 @@ async function generatePromptForCard({
   const promptType = normalizePromptType(room.prompt_type);
   const blankStyle = normalizeBlankStyle(room.blank_style, promptType);
 
+  // Normal hidden mode just means hide the full answer and ask for recall.
   if (promptType === "NORMAL_HIDDEN") {
     return {
       prompt_type: "NORMAL_HIDDEN",
@@ -299,6 +368,7 @@ async function generatePromptForCard({
     seed: seedBase + stableIndex,
   });
 
+  // Random-based modes need consistent per-card seeding and optional blank ratio.
   if (
     promptType === "RANDOM_BLANKS" ||
     promptType === "INCREASING_DIFFICULTY"
@@ -309,10 +379,12 @@ async function generatePromptForCard({
     payload.seed = seedBase + stableIndex;
   }
 
+  // Multiplayer currently always uses attempt 1 for increasing difficulty mode.
   if (promptType === "INCREASING_DIFFICULTY") {
     payload.attempt_number = 1;
   }
 
+  // Difficulty-level blanks are based on the flashcard's difficulty bucket.
   if (promptType === "DIFFICULTY_LEVEL_BLANKS") {
     payload.difficulty_level = await getDifficultyLevelForCard(card.flashcard_id);
   }
@@ -329,6 +401,8 @@ async function generatePromptForCard({
   };
 }
 
+// Checks that a given flashcard set belongs to the authenticated user.
+// Used when creating a room or replay room to prevent access to other users' sets.
 async function ensureSetOwnership(setId, userId) {
   const rows = await query(
     "SELECT set_id, title FROM flashcard_set WHERE set_id = ? AND user_id = ?",
@@ -337,6 +411,8 @@ async function ensureSetOwnership(setId, userId) {
   return rows[0] || null;
 }
 
+// Loads a single room by join code, including room settings, progression state,
+// timestamps, and the title of the linked flashcard set.
 async function getRoomByCode(joinCode) {
   const rows = await query(
     `SELECT
@@ -381,6 +457,8 @@ async function getRoomByCode(joinCode) {
   return rows[0] || null;
 }
 
+// Returns every participant in a room, including the host/controller.
+// Ordering places host first, then highest scores, then join order.
 async function getParticipants(roomId) {
   return query(
     `SELECT
@@ -401,6 +479,8 @@ async function getParticipants(roomId) {
   );
 }
 
+// Returns only participants who are active players in the room.
+// The host is usually excluded because the host acts as controller rather than player.
 async function getPlayingParticipants(roomId) {
   return query(
     `SELECT
@@ -421,6 +501,7 @@ async function getPlayingParticipants(roomId) {
   );
 }
 
+// Loads all flashcards used by a room by following the room's set_id.
 async function getCardsForRoom(roomId) {
   return query(
     `SELECT flashcard_id, question, answer
@@ -431,6 +512,8 @@ async function getCardsForRoom(roomId) {
   );
 }
 
+// Returns the participant IDs of players who have already submitted an answer
+// for the current flashcard.
 async function getAnsweredParticipantIds(roomId, flashcardId) {
   if (!flashcardId) return [];
   const rows = await query(
@@ -444,6 +527,8 @@ async function getAnsweredParticipantIds(roomId, flashcardId) {
   return rows.map((r) => Number(r.participant_id));
 }
 
+// Returns one participant's submitted answer and whether it was correct
+// for a specific flashcard. Used mainly during RESULT phase for viewer feedback.
 async function getParticipantAnswerResult(roomId, participantId, flashcardId) {
   const rows = await query(
     `SELECT user_answer, is_correct
@@ -461,6 +546,8 @@ async function getParticipantAnswerResult(roomId, participantId, flashcardId) {
     : null;
 }
 
+// Checks whether all active players in the room have answered the current card.
+// If true, the server can end the TEST phase early and move to RESULT.
 async function allPlayersAnswered(roomId, flashcardId) {
   const players = await getPlayingParticipants(roomId);
   if (players.length === 0) return false;
@@ -468,6 +555,8 @@ async function allPlayersAnswered(roomId, flashcardId) {
   return answeredIds.length >= players.length;
 }
 
+// Updates a participant's connection state, and refreshes their last_seen_at time.
+// Used when reconnecting/disconnecting.
 async function markParticipantConnected(roomId, userId, isConnected) {
   await query(
     `UPDATE multiplayer_participant
@@ -477,6 +566,9 @@ async function markParticipantConnected(roomId, userId, isConnected) {
   );
 }
 
+// Prepares a room's engine state before the game starts.
+// It creates a shared card order (optionally shuffled) and resets all
+// mode-specific indices/phases so the room starts cleanly.
 async function initializeRoomEngine(room, cards) {
   if (!room || !cards.length) return;
 
@@ -504,11 +596,26 @@ async function initializeRoomEngine(room, cards) {
   );
 }
 
+// Core room engine: based on current room state and cards, this function decides
+// what the NEXT multiplayer step should be.
+//
+// It does not update the database itself.
+// Instead, it returns a step object describing the current phase/card to show,
+// or returns special flags such as:
+// - done: true
+// - error: ...
+// - call_next_again: true
+//
+// This keeps the game flow logic centralised in one place.
 async function buildMultiplayerStep(room, cards) {
   const difficultyMode = String(room.difficulty_mode || "EASY").toUpperCase();
   const orderedIds = safeJsonParse(room.card_order_json, []).map(Number);
   const cardById = new Map(cards.map((c) => [Number(c.flashcard_id), c]));
 
+  // EASY mode:
+  // Each card has:
+  // 1) PREVIEW phase showing question + answer
+  // 2) TEST phase asking the same card from memory
   if (difficultyMode === "EASY") {
     const idx = Number(room.easy_index || 0);
     if (idx >= orderedIds.length) return { done: true };
@@ -546,6 +653,11 @@ async function buildMultiplayerStep(room, cards) {
     };
   }
 
+  // MODERATE mode:
+  // Cards are grouped.
+  // For each group:
+  // - all cards are previewed first
+  // - then the same group is tested
   if (difficultyMode === "MODERATE") {
     const gs = Math.max(1, Number(room.group_size || 5));
     const groupIndex = Number(room.moderate_group_index || 0);
@@ -558,6 +670,7 @@ async function buildMultiplayerStep(room, cards) {
       const previewIndex = Number(room.moderate_preview_index || 0);
       const absoluteIndex = groupStart + previewIndex;
 
+      // If preview of this group is finished, signal caller to advance and rebuild.
       if (absoluteIndex >= groupEnd) {
         return {
           difficulty_mode: "MODERATE",
@@ -584,6 +697,8 @@ async function buildMultiplayerStep(room, cards) {
     const testIndex = Number(room.moderate_test_index || 0);
     const absoluteIndex = groupStart + testIndex;
 
+    // If test of this group is finished, signal caller to advance back into the
+    // next group's preview phase.
     if (absoluteIndex >= groupEnd) {
       return {
         difficulty_mode: "MODERATE",
@@ -614,10 +729,14 @@ async function buildMultiplayerStep(room, cards) {
     };
   }
 
+  // HARD mode:
+  // First, preview all cards linearly.
+  // Then enter a test queue where cards are answered from memory only.
   if (difficultyMode === "HARD") {
     if (String(room.hard_phase || "PREVIEW") === "PREVIEW") {
       const idx = Number(room.hard_preview_index || 0);
 
+      // If preview is finished, signal caller to advance into test mode.
       if (idx >= cards.length) {
         return {
           difficulty_mode: "HARD",
@@ -668,10 +787,16 @@ async function buildMultiplayerStep(room, cards) {
   return { error: "Unsupported difficulty mode" };
 }
 
+// Advances the room engine after a phase finishes.
+// This function updates the database state so that the next call to
+// buildMultiplayerStep() reflects the room's new position.
 async function advanceRoomEngine(room, cards) {
   const difficultyMode = String(room.difficulty_mode || "EASY").toUpperCase();
   const orderedIds = safeJsonParse(room.card_order_json, []).map(Number);
 
+  // EASY mode:
+  // PREVIEW -> TEST for same card
+  // TEST -> next card PREVIEW
   if (difficultyMode === "EASY") {
     if (String(room.easy_phase || "PREVIEW") === "PREVIEW") {
       await query(
@@ -693,6 +818,8 @@ async function advanceRoomEngine(room, cards) {
     return;
   }
 
+  // MODERATE mode:
+  // Handles movement within preview/test indices and between groups.
   if (difficultyMode === "MODERATE") {
     const gs = Math.max(1, Number(room.group_size || 5));
     const groupIndex = Number(room.moderate_group_index || 0);
@@ -746,6 +873,10 @@ async function advanceRoomEngine(room, cards) {
     return;
   }
 
+  // HARD mode:
+  // PREVIEW increments through cards.
+  // Once preview is done, it creates the test queue.
+  // During TEST, it removes the front card from the queue after completion.
   if (difficultyMode === "HARD") {
     if (String(room.hard_phase || "PREVIEW") === "PREVIEW") {
       const idx = Number(room.hard_preview_index || 0);
@@ -787,6 +918,9 @@ async function advanceRoomEngine(room, cards) {
   }
 }
 
+// Starts the shared RESULT phase for the current card.
+// During this phase, all players can see the correct answer and their own result.
+// After RESULT_SECONDS, the room automatically advances to the next step.
 async function beginResultPhase(io, joinCode) {
   const room = await getRoomByCode(joinCode);
   if (!room) return;
@@ -818,6 +952,14 @@ async function beginResultPhase(io, joinCode) {
   );
 }
 
+// Main room progression controller.
+// This function:
+// 1) builds the current step
+// 2) marks the room with the correct phase/timer
+// 3) emits room state to clients
+// 4) schedules the automatic transition when the timer ends
+//
+// It is the central loop that drives multiplayer gameplay.
 async function stepRoom(io, joinCode) {
   const room = await getRoomByCode(joinCode);
   if (!room) return;
@@ -830,17 +972,22 @@ async function stepRoom(io, joinCode) {
     throw new Error(step.error);
   }
 
+  // No more cards/steps means the room is finished.
   if (step?.done) {
     await finishRoom(io, joinCode, "FINISHED");
     return;
   }
 
+  // Some transitions require the engine to advance internally first,
+  // then rebuild the next visible step immediately.
   if (step.call_next_again) {
     await advanceRoomEngine(room, cards);
     await stepRoom(io, joinCode);
     return;
   }
 
+  // Determine which timer to use for this phase:
+  // preview time, display time, or answer time.
   const timerSeconds =
     step.reveal_seconds ??
     step.display_time_per_card ??
@@ -850,6 +997,7 @@ async function stepRoom(io, joinCode) {
   const phaseEndsAt =
     timerSeconds !== null ? new Date(Date.now() + Number(timerSeconds) * 1000) : null;
 
+  // Persist the room phase and countdown target.
   await query(
     `UPDATE multiplayer_room
      SET status = 'LIVE',
@@ -859,8 +1007,10 @@ async function stepRoom(io, joinCode) {
     [step.phase, phaseEndsAt, room.room_id]
   );
 
+  // Push updated room state to all connected clients.
   await emitRoomState(io, joinCode);
 
+  // Schedule automatic transition when the phase timer ends.
   if (timerSeconds !== null) {
     setRoomTimer(
       joinCode,
@@ -868,11 +1018,13 @@ async function stepRoom(io, joinCode) {
         const latestRoom = await getRoomByCode(joinCode);
         if (!latestRoom) return;
 
+        // TEST phase always moves into RESULT first.
         if (step.phase === "TEST") {
           await beginResultPhase(io, joinCode);
           return;
         }
 
+        // PREVIEW phase moves straight to the next engine state.
         const latestCards = await getCardsForRoom(latestRoom.room_id);
         await advanceRoomEngine(latestRoom, latestCards);
         await stepRoom(io, joinCode);
@@ -882,6 +1034,9 @@ async function stepRoom(io, joinCode) {
   }
 }
 
+// Marks a room as finished or closed, clears timers, and emits final room state.
+// FINISHED is used for completed/ended games.
+// CLOSED is used when the host closes the lobby before the game starts.
 async function finishRoom(io, joinCode, status = "FINISHED") {
   const room = await getRoomByCode(joinCode);
   if (!room) return;
@@ -900,6 +1055,18 @@ async function finishRoom(io, joinCode, status = "FINISHED") {
   await emitRoomState(io, joinCode);
 }
 
+// Builds the full room state object returned to the frontend and also emitted
+// through socket events.
+//
+// It includes:
+// - room metadata
+// - participant list
+// - the current visible step
+// - which players already answered
+// - leaderboard data
+// - viewer-specific info such as whether the viewer is host/playing/answered
+//
+// This is what keeps all clients in sync with the same room state.
 async function buildRoomState(joinCode, viewerUserId = null) {
   const room = await getRoomByCode(joinCode);
   if (!room) return null;
@@ -911,6 +1078,7 @@ async function buildRoomState(joinCode, viewerUserId = null) {
     (p) => Number(p.user_id) === Number(viewerUserId)
   );
 
+  // Only build the current visible step while the room is live or finished.
   const baseStep =
     room.status === "LIVE" || room.status === "FINISHED"
       ? await buildMultiplayerStep(room, cards)
@@ -920,6 +1088,7 @@ async function buildRoomState(joinCode, viewerUserId = null) {
   let answeredParticipants = [];
   let hasAnsweredCurrentCard = false;
 
+  // During TEST or RESULT, collect which players have already submitted an answer.
   if (
     currentStep?.flashcard_id &&
     (room.phase === "TEST" || room.phase === "RESULT")
@@ -944,6 +1113,9 @@ async function buildRoomState(joinCode, viewerUserId = null) {
     }
   }
 
+  // In RESULT phase, enrich the step with:
+  // - correct answer
+  // - the current viewer's submitted answer + correctness
   if (currentStep && room.phase === "RESULT") {
     const currentCard = cards.find(
       (c) => Number(c.flashcard_id) === Number(currentStep.flashcard_id)
@@ -964,6 +1136,7 @@ async function buildRoomState(joinCode, viewerUserId = null) {
     };
   }
 
+  // Leaderboard is based only on active playing participants.
   const leaderboard = playingParticipants.map((p) => ({
     participant_id: p.participant_id,
     user_id: p.user_id,
@@ -1000,15 +1173,25 @@ async function buildRoomState(joinCode, viewerUserId = null) {
   };
 }
 
+// Emits room state over Socket.IO.
+// It sends:
+// - one shared generic state to the whole room
+// - one personalised state to each participant's private user channel
+//
+// The personal state is important because some room fields depend on the viewer,
+// for example whether they have answered or what their RESULT feedback was.
 async function emitRoomState(io, joinCode) {
   const code = String(joinCode).toUpperCase();
   const room = await getRoomByCode(code);
   if (!room) return;
 
   const participants = await getParticipants(room.room_id);
+
+  // Shared state for the whole room channel
   const genericState = await buildRoomState(code, null);
   io.to(`room:${code}`).emit("room:state", genericState);
 
+  // Personalised state for each participant
   for (const participant of participants) {
     if (!participant.user_id) continue;
     const personalState = await buildRoomState(code, participant.user_id);
@@ -1019,6 +1202,8 @@ async function emitRoomState(io, joinCode) {
   }
 }
 
+// Creates a new lobby that reuses the same settings as a previous room.
+// This powers the "play again" flow after a completed multiplayer session.
 async function createReplayRoom({ userId, sourceRoom }) {
   const joinCode = await generateUniqueJoinCode();
 
@@ -1047,6 +1232,7 @@ async function createReplayRoom({ userId, sourceRoom }) {
     ]
   );
 
+  // Insert the host as the room controller. Host is not marked as a playing user.
   await query(
     `INSERT INTO multiplayer_participant
      (room_id, user_id, display_name, is_host, is_playing, is_connected)
@@ -1056,6 +1242,14 @@ async function createReplayRoom({ userId, sourceRoom }) {
 
   return joinCode;
 }
+
+
+// ROUTE: Create a new multiplayer room
+// POST /api/multiplayer/rooms
+//
+// Validates the chosen set belongs to the user, stores room configuration,
+// inserts the host as a participant/controller, and returns the room info plus
+// a shareable join URL.
 
 router.post("/rooms", requireAuth, async (req, res) => {
   try {
@@ -1113,6 +1307,8 @@ router.post("/rooms", requireAuth, async (req, res) => {
 
     const roomId = roomInsert.insertId;
 
+    // Insert the creator as the host participant.
+    // is_playing = 0 means the host controls the room rather than submits answers.
     await query(
       `INSERT INTO multiplayer_participant
        (room_id, user_id, display_name, is_host, is_playing, is_connected)
@@ -1139,6 +1335,13 @@ router.post("/rooms", requireAuth, async (req, res) => {
   }
 });
 
+
+// ROUTE: Join an existing multiplayer room
+// POST /api/multiplayer/join
+//
+// Lets an authenticated user join a lobby as a player, or reconnect if they are
+// already part of the room. Late joining is blocked once the game has started.
+
 router.post("/join", requireAuth, async (req, res) => {
   try {
     const { join_code, display_name } = req.body || {};
@@ -1164,6 +1367,7 @@ router.post("/join", requireAuth, async (req, res) => {
       [room.room_id, req.user.userId]
     );
 
+    // New players can only join while the room is still in the lobby.
     if (room.status !== "LOBBY" && existing.length === 0) {
       return res.status(403).json({
         message: "This game has already started. Late joining is disabled.",
@@ -1171,6 +1375,7 @@ router.post("/join", requireAuth, async (req, res) => {
     }
 
     if (existing.length === 0) {
+      // New participant joins as an active player.
       await query(
         `INSERT INTO multiplayer_participant
          (room_id, user_id, display_name, is_host, is_playing, is_connected)
@@ -1182,6 +1387,7 @@ router.post("/join", requireAuth, async (req, res) => {
         ]
       );
     } else {
+      // Existing participant is simply marked connected again.
       await query(
         `UPDATE multiplayer_participant
          SET is_connected = 1, last_seen_at = NOW()
@@ -1199,6 +1405,13 @@ router.post("/join", requireAuth, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
+// ROUTE: Reconnect to a room you already belong to
+// POST /api/multiplayer/rooms/:joinCode/reconnect
+//
+// Used by the frontend after socket reconnects or page refreshes so the server
+// can mark the player as connected and send them their current personal room state.
 
 router.post("/rooms/:joinCode/reconnect", requireAuth, async (req, res) => {
   try {
@@ -1231,6 +1444,13 @@ router.post("/rooms/:joinCode/reconnect", requireAuth, async (req, res) => {
   }
 });
 
+
+// ROUTE: Get the current room state
+// GET /api/multiplayer/rooms/:joinCode
+//
+// Returns the current personalised room state for the logged-in viewer.
+// This is used on initial page load before socket events take over.
+
 router.get("/rooms/:joinCode", requireAuth, async (req, res) => {
   try {
     const state = await buildRoomState(
@@ -1246,6 +1466,14 @@ router.get("/rooms/:joinCode", requireAuth, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
+// ROUTE: Start a multiplayer room
+// POST /api/multiplayer/rooms/:joinCode/start
+//
+// Host-only action.
+// Validates room is in the lobby, ensures there are cards and at least one player,
+// initialises the room engine, marks the room live, and starts the first step.
 
 router.post("/rooms/:joinCode/start", requireAuth, async (req, res) => {
   try {
@@ -1291,6 +1519,13 @@ router.post("/rooms/:joinCode/start", requireAuth, async (req, res) => {
   }
 });
 
+
+// ROUTE: Close a lobby before the game starts
+// POST /api/multiplayer/rooms/:joinCode/close
+//
+// Host-only action.
+// This is only allowed while the room is still in LOBBY state.
+
 router.post("/rooms/:joinCode/close", requireAuth, async (req, res) => {
   try {
     const normalizedCode = String(req.params.joinCode).trim().toUpperCase();
@@ -1313,6 +1548,13 @@ router.post("/rooms/:joinCode/close", requireAuth, async (req, res) => {
   }
 });
 
+
+// ROUTE: End a live room early
+// POST /api/multiplayer/rooms/:joinCode/end
+//
+// Host-only action.
+// This forces a live game to finish immediately.
+
 router.post("/rooms/:joinCode/end", requireAuth, async (req, res) => {
   try {
     const normalizedCode = String(req.params.joinCode).trim().toUpperCase();
@@ -1334,6 +1576,13 @@ router.post("/rooms/:joinCode/end", requireAuth, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
+// ROUTE: Play again
+// POST /api/multiplayer/rooms/:joinCode/play-again
+//
+// Host-only action.
+// Creates a fresh lobby that reuses the same set and settings as the previous room.
 
 router.post("/rooms/:joinCode/play-again", requireAuth, async (req, res) => {
   try {
@@ -1368,6 +1617,22 @@ router.post("/rooms/:joinCode/play-again", requireAuth, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
+// ROUTE: Submit an answer for the current multiplayer test card
+// POST /api/multiplayer/rooms/:joinCode/answer
+//
+// Player-only action.
+// Validates:
+// - room exists
+// - room is live
+// - current step is TEST
+// - user is a participant
+// - user is a playing participant, not the host/controller
+// - user has not already answered this card
+//
+// Then it stores the answer, updates score if correct, emits new room state,
+// and if everyone has answered, ends TEST phase early and moves to RESULT.
 
 router.post("/rooms/:joinCode/answer", requireAuth, async (req, res) => {
   try {
@@ -1417,6 +1682,7 @@ router.post("/rooms/:joinCode/answer", requireAuth, async (req, res) => {
       return res.status(400).json({ message: "Active card not found" });
     }
 
+    // Use the same hybrid answer checking logic as solo mode.
     const correct = isAnswerCorrectHybrid(user_answer, card.answer) ? 1 : 0;
 
     await query(
@@ -1433,6 +1699,8 @@ router.post("/rooms/:joinCode/answer", requireAuth, async (req, res) => {
       ]
     );
 
+    // Correct answers increment score.
+    // Incorrect answers still update last_seen_at so reconnect/activity stays fresh.
     if (correct) {
       await query(
         `UPDATE multiplayer_participant
@@ -1451,6 +1719,8 @@ router.post("/rooms/:joinCode/answer", requireAuth, async (req, res) => {
 
     await emitRoomState(req.app.get("io"), normalizedCode);
 
+    // If every active player has answered, do not wait for the timer to expire.
+    // Move immediately into the RESULT phase.
     const everyoneAnswered = await allPlayersAnswered(
       room.room_id,
       step.flashcard_id
@@ -1470,4 +1740,5 @@ router.post("/rooms/:joinCode/answer", requireAuth, async (req, res) => {
   }
 });
 
+// Export the configured router so app.js can mount it under the multiplayer API path.
 module.exports = router;

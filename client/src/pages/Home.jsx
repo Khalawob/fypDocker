@@ -35,7 +35,7 @@ export default function Home() {
   return (
     <div style={pageStyle}>
       <header style={styles.navbar}>
-        <div style={styles.brand}>Flashcard App</div>
+        <div style={styles.brand}>Learn In A Flash</div>
 
         <nav style={styles.navLinks}>
           <Link style={styles.navLink} to="/about">
@@ -49,6 +49,9 @@ export default function Home() {
               </Link>
               <Link style={styles.navLink} to="/practice">
                 Practice
+              </Link>
+              <Link style={styles.navLink} to="/multiplayer/join">
+                Join Room
               </Link>
               <Link style={styles.navLink} to="/profile">
                 Profile
@@ -116,6 +119,9 @@ export default function Home() {
                 </Link>
                 <Link style={styles.heroSecondaryButton} to="/practice">
                   Start Practice
+                </Link>
+                <Link style={styles.heroSecondaryButton} to="/multiplayer/join">
+                  Join Multiplayer Room
                 </Link>
               </>
             )}
