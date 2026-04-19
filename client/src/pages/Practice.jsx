@@ -334,10 +334,9 @@ export default function Practice() {
       }
 
       const nextTimer =
-        data.reveal_seconds ??
-        data.display_time_per_card ??
-        data.answer_time_limit ??
-        null;
+        data.phase === "PREVIEW"
+          ? (data.reveal_seconds ?? data.display_time_per_card ?? null)
+          : (data.answer_time_limit ?? null);
 
       if (nextTimer !== null && nextTimer !== undefined) {
         const rounded = Math.ceil(Number(nextTimer));
@@ -440,9 +439,8 @@ export default function Practice() {
 
   const timerLabel = useMemo(() => {
     if (!currentCard) return "";
-    if (currentCard.reveal_seconds) return "Preview time remaining";
-    if (currentCard.display_time_per_card) return "Display time remaining";
-    if (currentCard.answer_time_limit) return "Answer time remaining";
+    if (currentCard.phase === "PREVIEW") return "Preview time remaining";
+    if (currentCard.phase === "TEST") return "Answer time remaining";
     return "Time remaining";
   }, [currentCard]);
 

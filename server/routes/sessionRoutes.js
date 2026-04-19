@@ -1,14 +1,14 @@
 // server/routes/sessionRoutes.js
 // server/routes/sessionRoutes.js
-const express = require("express"); // Express
-const db = require("../db"); // MySQL connection
-const { requireAuth } = require("../middleware/auth"); // JWT middleware
-const { updateAdaptiveSetReminder } = require("../utils/setReviewScheduler");
+const express = require("express"); // Express framework for defining API routes
+const db = require("../db"); // Shared MySQL database connection
+const { requireAuth } = require("../middleware/auth"); // Middleware that ensures the user is logged in
+const { updateAdaptiveSetReminder } = require("../utils/setReviewScheduler"); // Helper used to reschedule adaptive reminders after a completed session
 
+const router = express.Router(); // Router instance exported at the end of the file
 
-const router = express.Router(); // Router
-
-// Promise wrapper for MySQL queries
+// Promise wrapper for MySQL queries.
+// Converts callback-based db.query into a Promise so async/await can be used.
 function query(sql, params = []) {
   return new Promise((resolve, reject) => {
     db.query(sql, params, (err, results) => {
@@ -18,11 +18,16 @@ function query(sql, params = []) {
   });
 }
 
-// Clamp helper
+// Clamp helper.
+// Restricts a number to stay within the provided min/max range.
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
+// Awards a badge to a user using the badge's code value.
+// If the badge does not exist, returns false.
+// If the badge already exists for the user, the ON DUPLICATE KEY clause
+// prevents duplicate rows being created.
 async function awardBadgeByCode(userId, code) {
   const badgeRows = await query(
     "SELECT badge_id FROM badges WHERE code = ? LIMIT 1",
@@ -51,8 +56,19 @@ async function awardBadgeByCode(userId, code) {
  * based on performance_result.
  */
 
+// This is the main reusable session-completion engine.
+// It is responsible for:
+// 1) verifying the session belongs to the user
+// 2) reading the performance_result records for the session
+// 3) updating user_flashcard_stats for each attempted card
+// 4) saving the final session score
+// 5) updating adaptive reminders if needed
+// 6) awarding badges triggered by the session
+//
+// It is reused both by this route file and by practiceRoutes.js.
 async function completeSessionForUser(sessionId, userId) {
   // 1) Ensure session belongs to user
+  // Load the session and related timing/adaptive settings.
   const sessionRows = await query(
     `SELECT
        ps.session_id,
@@ -68,6 +84,7 @@ async function completeSessionForUser(sessionId, userId) {
     [sessionId, userId]
   );
 
+  // If the session does not belong to this user, stop immediately.
   if (sessionRows.length === 0) {
     const err = new Error("Session not found");
     err.status = 404;
@@ -77,6 +94,10 @@ async function completeSessionForUser(sessionId, userId) {
   const session = sessionRows[0];
 
   // 2) Aggregate performance per flashcard for this session
+  // Summarise each flashcard's performance within this session:
+  // - number of attempts
+  // - how many were correct
+  // - average answer time
   const perf = await query(
     `SELECT
        flashcard_id,
@@ -89,6 +110,7 @@ async function completeSessionForUser(sessionId, userId) {
     [sessionId]
   );
 
+  // If no performance data exists, the session cannot be completed meaningfully.
   if (perf.length === 0) {
     const err = new Error("No performance data for this session");
     err.status = 400;
@@ -96,8 +118,10 @@ async function completeSessionForUser(sessionId, userId) {
   }
 
   // 3) Load existing stats rows (if any) for this user + these flashcards
+  // Build a list of flashcard IDs attempted in this session.
   const ids = perf.map((r) => r.flashcard_id);
 
+  // Load any existing per-user stats rows for those cards.
   const existingStats = await query(
     `SELECT user_id, flashcard_id, difficulty_rating, times_seen, correct_count, incorrect_count, avg_time_taken
      FROM user_flashcard_stats
@@ -105,13 +129,17 @@ async function completeSessionForUser(sessionId, userId) {
     [userId, ...ids]
   );
 
+  // Store existing stats in a Map for fast lookup by flashcard ID.
   const statsMap = new Map(existingStats.map((s) => [s.flashcard_id, s]));
 
   // 4) Compute updates + apply them
+  // updates will be returned in the response so the frontend/other code
+  // can inspect which cards changed.
   const updates = [];
   let totalCorrect = 0;
   let totalAttempts = 0;
 
+  // Process each flashcard attempted in this session.
   for (const r of perf) {
     const flashcardId = r.flashcard_id;
     const attempts = Number(r.attempts || 0);
@@ -124,12 +152,19 @@ async function completeSessionForUser(sessionId, userId) {
     const incorrect = attempts - correct;
 
     // Session difficulty score (0..100)
+    // This score increases when:
+    // - the user gets more answers wrong
+    // - the user takes longer to answer
+    //
+    // incorrectRate contributes most of the difficulty score,
+    // while timeFactor adds a smaller timing-based influence.
     const incorrectRate = attempts > 0 ? incorrect / attempts : 0; // 0..1
     const timeFactor = clamp(avgTimeThisSession / 10, 0, 2); // 0..2 (10s baseline)
     const sessionScore = clamp(incorrectRate * 80 + timeFactor * 10, 0, 100);
 
     const existing = statsMap.get(flashcardId);
 
+    // If the user has never seen this flashcard before, create a fresh stats row.
     if (!existing) {
       // First time user has stats for this card
       const initialRating = clamp(sessionScore, 0, 100);
@@ -151,6 +186,7 @@ async function completeSessionForUser(sessionId, userId) {
         avg_time_taken: initialAvgTime,
       });
     } else {
+      // If stats already exist, merge this session into the running totals.
       const oldRating = Number(existing.difficulty_rating || 0);
       const oldSeen = Number(existing.times_seen || 0);
       const oldCorrect = Number(existing.correct_count || 0);
@@ -162,11 +198,13 @@ async function completeSessionForUser(sessionId, userId) {
       const newIncorrect = oldIncorrect + incorrect;
 
       // Running average time (weighted by attempts)
+      // This preserves historical timing instead of overwriting it with only this session's average.
       const oldTotalTime = oldAvgTime * oldSeen;
       const newTotalTime = oldTotalTime + avgTimeThisSession * attempts;
       const newAvgTime = newSeen > 0 ? newTotalTime / newSeen : 0;
 
       // Smooth difficulty update (prevents wild jumps)
+      // Old difficulty contributes 70%, current session contributes 30%.
       const updatedRating = clamp(oldRating * 0.7 + sessionScore * 0.3, 0, 100);
 
       await query(
@@ -188,6 +226,7 @@ async function completeSessionForUser(sessionId, userId) {
   }
 
   // 5) Final score for the session (percentage)
+  // finalScore is stored in practice_session as a rounded percentage.
   const finalScore = totalAttempts > 0 ? Math.round((totalCorrect / totalAttempts) * 100) : 0;
 
   await query(
@@ -195,8 +234,11 @@ async function completeSessionForUser(sessionId, userId) {
     [finalScore, sessionId]
   );
 
+  // accuracy is kept as a 0..1 ratio because the reminder scheduler expects it in that form.
   const accuracy = totalAttempts > 0 ? totalCorrect / totalAttempts : 0;
 
+  // If the set has adaptive reminders enabled, update the next reminder timing
+  // based on the user's session accuracy and difficulty mode.
   try {
     const reminderRows = await query(
       `SELECT reminder_enabled, adaptive_enabled
@@ -218,14 +260,19 @@ async function completeSessionForUser(sessionId, userId) {
       }
     }
   } catch (schedulerErr) {
+    // Reminder scheduling failures should not block session completion.
     console.error("Adaptive reminder scheduling error:", schedulerErr);
   }
 
+  // Award badges based on the finished session.
+  // This is wrapped in its own try/catch so badge issues do not block completion.
   try {
+    // Perfect score badge
     if (finalScore === 100) {
       await awardBadgeByCode(userId, "PERFECT_RECALL");
     }
 
+    // Mode-specific badges
     if (String(session.difficulty_mode).toUpperCase() === "EASY") {
       await awardBadgeByCode(userId, "EASY_EXPLORER");
     }
@@ -238,6 +285,7 @@ async function completeSessionForUser(sessionId, userId) {
       await awardBadgeByCode(userId, "HARDCORE_HERO");
     }
 
+    // Adaptive learner badge if any adaptive timing feature was enabled.
     const adaptiveUsed =
       Number(session.use_adaptive_timing) === 1 ||
       Number(session.use_adaptive_preview_timing) === 1 ||
@@ -247,6 +295,8 @@ async function completeSessionForUser(sessionId, userId) {
       await awardBadgeByCode(userId, "ADAPTIVE_LEARNER");
     }
 
+    // Consistent accuracy badge if the user has completed at least 5 sessions
+    // with scores of 80% or higher.
     const consistentRows = await query(
       `SELECT COUNT(*) AS qualifying_count
        FROM practice_session
@@ -264,6 +314,7 @@ async function completeSessionForUser(sessionId, userId) {
   }
 
   // Return completion payload (used by endpoint + practice auto-complete)
+  // This summary is reused by both this route and practiceRoutes.js.
   return {
     session_id: sessionId,
     final_score: finalScore,
@@ -273,9 +324,11 @@ async function completeSessionForUser(sessionId, userId) {
   };
 }
 
-
+// POST /api/sessions/:sessionId/complete
+// Manually completes a practice session for the logged-in user
+// by running the reusable completeSessionForUser engine.
 router.post("/sessions/:sessionId/complete", requireAuth, async (req, res) => {
-  const sessionId = Number(req.params.sessionId);
+  const sessionId = Number(req.params.sessionId); // Parse session ID from the URL
 
   try {
     const result = await completeSessionForUser(sessionId, req.user.userId);

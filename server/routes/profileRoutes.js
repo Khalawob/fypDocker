@@ -1,11 +1,12 @@
 // server/routes/profileRoutes.js
-const express = require("express");
-const db = require("../db");
-const { requireAuth } = require("../middleware/auth");
+const express = require("express"); // Express framework for defining API routes
+const db = require("../db"); // Shared MySQL database connection
+const { requireAuth } = require("../middleware/auth"); // Middleware that ensures the user is logged in
 
-const router = express.Router();
+const router = express.Router(); // Router instance exported at the end of the file
 
-// Promise wrapper 
+// Promise wrapper
+// Converts callback-based db.query into a Promise so async/await can be used.
 function query(sql, params = []) {
   return new Promise((resolve, reject) => {
     db.query(sql, params, (err, results) => {
@@ -16,11 +17,15 @@ function query(sql, params = []) {
 }
 
 // GET /api/profile/me
+// Returns the logged-in user's profile information, along with account details
+// from the users table and the full badge list showing which badges are earned.
 router.get("/me", requireAuth, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = req.user.userId; // Read logged-in user ID from the auth middleware
 
     // Join with users so frontend can show username/email too
+    // This query combines account information from the users table
+    // with profile-specific information from user_profile.
     let rows = await query(
       `SELECT 
          u.user_id,
@@ -44,11 +49,14 @@ router.get("/me", requireAuth, async (req, res) => {
       [userId]
     );
 
+    // If the user account itself does not exist, return 404.
     if (rows.length === 0) {
       return res.status(404).json({ message: "User not found" });
     }
 
     // If profile row doesn't exist for some reason, create it automatically
+    // The LEFT JOIN can return user data even if no matching user_profile row exists.
+    // This block ensures a profile row is created so the system stays consistent.
     if (
       rows[0].display_name === null &&
       rows[0].bio === null &&
@@ -60,6 +68,7 @@ router.get("/me", requireAuth, async (req, res) => {
         [userId]
       );
 
+      // Re-run the profile query so the response includes the freshly ensured profile row.
       rows = await query(
         `SELECT 
            u.user_id,
@@ -84,6 +93,8 @@ router.get("/me", requireAuth, async (req, res) => {
       );
     }
 
+    // Load every badge in the system and mark whether this user has earned it.
+    // Earned badges are sorted first, then by most recent earned date.
     const badgeRows = await query(
       `SELECT
          b.badge_id,
@@ -104,6 +115,7 @@ router.get("/me", requireAuth, async (req, res) => {
       [userId]
     );
 
+    // Return the full profile object plus the badges array.
     return res.json({
       ...rows[0],
       badges: badgeRows,
@@ -115,9 +127,11 @@ router.get("/me", requireAuth, async (req, res) => {
 });
 
 // PUT /api/profile/me
+// Updates selected editable profile fields for the logged-in user.
+// Only fields provided in the request body are updated.
 router.put("/me", requireAuth, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = req.user.userId; // Read logged-in user ID from the auth middleware
 
     const {
       display_name,
@@ -129,6 +143,7 @@ router.put("/me", requireAuth, async (req, res) => {
     } = req.body || {};
 
     // basic validation + safety clamps
+    // Trim and limit string fields to safe lengths before storing them.
     const safeDisplay =
       display_name !== undefined
         ? String(display_name).trim().slice(0, 80)
@@ -144,6 +159,8 @@ router.put("/me", requireAuth, async (req, res) => {
         ? String(timezone).trim().slice(0, 64)
         : undefined;
 
+    // Validate and clamp the daily study goal.
+    // It must be a number between 0 and 600 minutes.
     let safeGoal = study_goal_minutes_per_day;
     if (safeGoal !== undefined && safeGoal !== null) {
       safeGoal = Number(safeGoal);
@@ -155,6 +172,8 @@ router.put("/me", requireAuth, async (req, res) => {
       safeGoal = Math.max(0, Math.min(600, Math.round(safeGoal))); // 0..600 minutes
     }
 
+    // Validate preferred difficulty if it is provided.
+    // Only EASY, MODERATE, or HARD are allowed.
     let safePref = preferred_difficulty;
     if (safePref !== undefined && safePref !== null) {
       safePref = String(safePref).toUpperCase();
@@ -166,14 +185,17 @@ router.put("/me", requireAuth, async (req, res) => {
     }
 
     // ensure profile exists then update only provided fields
+    // This guarantees there is a user_profile row before trying to update it.
     await query(
       "INSERT INTO user_profile (user_id) VALUES (?) ON DUPLICATE KEY UPDATE user_id = user_id",
       [userId]
     );
 
-    const updates = [];
-    const params = [];
+    const updates = []; // Holds SQL assignments like "bio = ?"
+    const params = []; // Holds values for the SQL placeholders
 
+    // Helper for dynamically building the UPDATE query.
+    // Empty strings are converted to null so users can clear optional fields.
     function add(field, value) {
       if (value !== undefined) {
         updates.push(`${field} = ?`);
@@ -181,6 +203,7 @@ router.put("/me", requireAuth, async (req, res) => {
       }
     }
 
+    // Add only the fields that were actually supplied in the request.
     add("display_name", safeDisplay);
     add("bio", safeBio);
     add("avatar_url", safeAvatar);
@@ -188,12 +211,14 @@ router.put("/me", requireAuth, async (req, res) => {
     add("study_goal_minutes_per_day", safeGoal);
     add("preferred_difficulty", safePref);
 
+    // If nothing was provided, return an error instead of running an empty update.
     if (updates.length === 0) {
       return res.status(400).json({ message: "No fields provided to update" });
     }
 
-    params.push(userId);
+    params.push(userId); // Final WHERE clause parameter
 
+    // Update only the selected fields for this user's profile row.
     await query(
       `UPDATE user_profile SET ${updates.join(", ")} WHERE user_id = ?`,
       params
@@ -206,4 +231,5 @@ router.put("/me", requireAuth, async (req, res) => {
   }
 });
 
+// Export the configured router so it can be mounted in app.js
 module.exports = router;

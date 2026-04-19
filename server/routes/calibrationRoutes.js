@@ -48,7 +48,7 @@ function countWords(text) {
   return s.split(/\s+/).filter(Boolean).length; // Split on spaces and count tokens
 }
 
-// Hard-coded calibration prompts (For TESTING) Need Ideas on how to personalize this
+// Hard-coded calibration prompts (For TESTING) 
 const CALIBRATION_PROMPTS = [
   { id: 1, text: "The mitochondria produces energy for the cell." }, // Biology example
   { id: 2, text: "HTTP is the protocol used for communication on the web." }, // CS example

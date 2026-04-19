@@ -69,11 +69,6 @@ router.post("/login", (req, res) => {
 
       const user = results[0];
 
-      console.log("LOGIN DEBUG:"); // THIS IS FOR DEBUGGING PURPOSES ONLY, REMOVE IN PRODUCTION
-      console.log("Email:", email);
-      console.log("DB hash:", user.password_hash);
-      console.log("Password entered:", password);
-
       const match = await bcrypt.compare(password, user.password_hash);
       if (!match) {
         return res.status(401).json({ message: "Invalid credentials" });

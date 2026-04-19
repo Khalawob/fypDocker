@@ -1,9 +1,23 @@
+// Import React hooks:
+// useEffect runs side effects when the component loads,
+// useState stores local component state values.
 import { useEffect, useState } from "react";
+
+// Import React Router helpers:
+// useNavigate is used to move the user to another route programmatically,
+// useSearchParams is used to read query string values from the URL,
+// Link is used for clickable navigation links.
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
+
+// Import QRCodeCanvas so the generated room join link can be shown as a QR code
 import { QRCodeCanvas } from "qrcode.react";
 
+// Base API URL used for backend requests.
+// It uses an environment variable if available, otherwise falls back to localhost for development.
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
+// A lookup object describing the available prompt types for multiplayer practice.
+// Each option has a user-friendly label and explanation shown in the form.
 const PROMPT_TYPES = {
   NORMAL_HIDDEN: {
     label: "Hidden Answer",
@@ -35,18 +49,37 @@ const PROMPT_TYPES = {
   },
 };
 
+// Main page component for creating a multiplayer room
 export default function CreateMultiplayerRoom() {
+  // Read the user's auth token from localStorage so authenticated API requests can be made
   const token = localStorage.getItem("token");
+
+  // React Router navigation helper used to move the user into the room after creation
   const navigate = useNavigate();
+
+  // Read any query string values from the current URL
   const [searchParams] = useSearchParams();
 
+  // Stores the flashcard sets that belong to the user and can be selected for the room
   const [sets, setSets] = useState([]);
+
+  // Tracks whether the set list is currently loading
   const [loadingSets, setLoadingSets] = useState(true);
+
+  // Tracks whether the room creation request is currently in progress
   const [creating, setCreating] = useState(false);
+
+  // Stores any error message that should be shown to the user
   const [error, setError] = useState("");
+
+  // Stores the created room data returned by the backend after successful creation
   const [roomData, setRoomData] = useState(null);
+
+  // Controls whether the advanced settings section is expanded or hidden
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  // Stores all form values used to configure the multiplayer room.
+  // set_id may be prefilled from the URL query string if present.
   const [form, setForm] = useState({
     set_id: searchParams.get("set_id") || "",
     display_name: "",
@@ -60,16 +93,23 @@ export default function CreateMultiplayerRoom() {
     blank_ratio: "",
   });
 
+  // Determines whether the blank style selector should be shown.
+  // It is hidden when the prompt type is the normal hidden-answer mode.
   const shouldShowBlankStyle = form.prompt_type !== "NORMAL_HIDDEN";
+
+  // Determines whether the blank ratio input should be shown.
+  // It is only relevant for prompt types that hide a percentage of words.
   const shouldShowBlankRatio =
     form.prompt_type === "RANDOM_BLANKS" ||
     form.prompt_type === "INCREASING_DIFFICULTY";
 
+  // Load the user's flashcard sets when the page first opens
   useEffect(() => {
     loadSets();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Fetches the user's available flashcard sets from the backend
   async function loadSets() {
     try {
       setLoadingSets(true);
@@ -88,9 +128,12 @@ export default function CreateMultiplayerRoom() {
         return;
       }
 
+      // Save the fetched set list
       const nextSets = Array.isArray(data) ? data : data?.sets || [];
       setSets(nextSets);
 
+      // If a set_id is provided in the URL and it exists in the fetched sets, use it.
+      // Otherwise, default to the first available set if none is already selected.
       const querySetId = searchParams.get("set_id");
 
       if (
@@ -114,6 +157,8 @@ export default function CreateMultiplayerRoom() {
     }
   }
 
+  // Generic form change handler.
+  // It supports both normal inputs and checkbox inputs.
   function onChange(e) {
     const { name, value, type, checked } = e.target;
     setForm((prev) => ({
@@ -122,6 +167,9 @@ export default function CreateMultiplayerRoom() {
     }));
   }
 
+  // Handles submission of the room creation form.
+  // It validates the set selection, builds the payload, sends the request,
+  // and stores the returned room data if successful.
   async function onSubmit(e) {
     e.preventDefault();
     setError("");
@@ -135,6 +183,7 @@ export default function CreateMultiplayerRoom() {
     try {
       setCreating(true);
 
+      // Build the payload sent to the backend
       const payload = {
         set_id: Number(form.set_id),
         display_name: form.display_name.trim() || "Host",
@@ -147,6 +196,7 @@ export default function CreateMultiplayerRoom() {
         display_time_per_card: Number(form.display_time_per_card),
       };
 
+      // Only include blank_ratio if the user actually entered one
       if (form.blank_ratio !== "") {
         payload.blank_ratio = Number(form.blank_ratio);
       }
@@ -162,11 +212,13 @@ export default function CreateMultiplayerRoom() {
 
       const data = await res.json().catch(() => ({}));
 
+      // Show an error if room creation fails
       if (!res.ok) {
         setError(data?.message || "Failed to create room");
         return;
       }
 
+      // Save the room data so the success screen can be displayed
       setRoomData(data);
     } catch {
       setError("Server error while creating room");
@@ -175,14 +227,17 @@ export default function CreateMultiplayerRoom() {
     }
   }
 
+  // Opens the created multiplayer room by navigating to its room page
   function openRoom() {
     if (!roomData?.room?.join_code) return;
     navigate(`/multiplayer/room/${roomData.room.join_code}`);
   }
 
+  // Render the Create Multiplayer Room page UI
   return (
     <div style={styles.page}>
       <div style={styles.container}>
+        {/* Header row with page title and back navigation */}
         <div style={styles.headerRow}>
           <h1 style={styles.title}>Create Multiplayer Room</h1>
 
@@ -191,6 +246,7 @@ export default function CreateMultiplayerRoom() {
           </Link>
         </div>
 
+        {/* Show the setup form only before a room has been created */}
         {!roomData && (
           <form onSubmit={onSubmit} style={styles.card}>
             <h2 style={styles.sectionTitle}>Room Setup</h2>
@@ -198,6 +254,7 @@ export default function CreateMultiplayerRoom() {
               Choose the set and core multiplayer options below. Advanced settings can be opened if needed.
             </p>
 
+            {/* Main grid of core room configuration inputs */}
             <div style={styles.grid}>
               <div>
                 <label style={styles.label}>Flashcard Set</label>
@@ -273,6 +330,7 @@ export default function CreateMultiplayerRoom() {
                 </div>
               </div>
 
+              {/* Conditionally show blank style options depending on the selected prompt type */}
               {shouldShowBlankStyle && (
                 <div>
                   <label style={styles.label}>Blank Style</label>
@@ -292,6 +350,7 @@ export default function CreateMultiplayerRoom() {
               )}
             </div>
 
+            {/* Button for expanding or collapsing the advanced settings section */}
             <button
               type="button"
               style={styles.advancedToggle}
@@ -300,11 +359,13 @@ export default function CreateMultiplayerRoom() {
               {showAdvanced ? "Hide Advanced Settings ▲" : "Show Advanced Settings ▼"}
             </button>
 
+            {/* Advanced settings only appear when the user expands the section */}
             {showAdvanced && (
               <div style={styles.advancedSection}>
                 <div style={styles.subsectionTitle}>Advanced Settings</div>
 
                 <div style={styles.grid}>
+                  {/* Blank ratio input only appears for prompt types that support a ratio */}
                   {shouldShowBlankRatio && (
                     <div>
                       <label style={styles.label}>Blank Ratio</label>
@@ -371,6 +432,7 @@ export default function CreateMultiplayerRoom() {
                   </div>
                 </div>
 
+                {/* Checkbox options for additional room behavior */}
                 <div style={styles.checkboxGroup}>
                   <label style={styles.checkboxRow}>
                     <input
@@ -389,6 +451,7 @@ export default function CreateMultiplayerRoom() {
               </div>
             )}
 
+            {/* Explanatory section helping the user understand how multiplayer practice works */}
             <div style={styles.explainerCard}>
               <h3 style={styles.explainerTitle}>How Multiplayer Practice Works</h3>
 
@@ -423,6 +486,7 @@ export default function CreateMultiplayerRoom() {
               </div>
             </div>
 
+            {/* Main submit button used to create the multiplayer room */}
             <button
               type="submit"
               style={creating || loadingSets ? styles.disabledStartButton : styles.startButton}
@@ -433,8 +497,10 @@ export default function CreateMultiplayerRoom() {
           </form>
         )}
 
+        {/* Error message shown when room creation or set loading fails */}
         {error && <div style={styles.error}>{error}</div>}
 
+        {/* Success screen shown once the room has been created */}
         {roomData && (
           <div style={styles.card}>
             <h2 style={styles.sectionTitle}>Room Created</h2>
@@ -449,10 +515,12 @@ export default function CreateMultiplayerRoom() {
               <strong>Join URL:</strong> {roomData.join_url}
             </p>
 
+            {/* QR code for easy joining on another device */}
             <div style={styles.qrWrap}>
               <QRCodeCanvas value={roomData.join_url} size={220} />
             </div>
 
+            {/* Action button that opens the new room page */}
             <div style={styles.actionRow}>
               <button type="button" style={styles.button} onClick={openRoom}>
                 Open Room
@@ -465,17 +533,24 @@ export default function CreateMultiplayerRoom() {
   );
 }
 
+// Centralised styles object for the Create Multiplayer Room page.
+// This keeps presentation styling separate from logic.
 const styles = {
+  // Full page wrapper styling
   page: {
     minHeight: "100vh",
     background: "#0b1220",
     color: "white",
     padding: 24,
   },
+
+  // Main container that centres the content and limits width
   container: {
     maxWidth: 980,
     margin: "0 auto",
   },
+
+  // Header layout for title and back link
   headerRow: {
     display: "flex",
     justifyContent: "space-between",
@@ -484,29 +559,41 @@ const styles = {
     flexWrap: "wrap",
     marginBottom: 24,
   },
+
+  // Main page title styling
   title: {
     margin: 0,
   },
+
+  // Link styling for navigating back to the sets page
   backLink: {
     color: "#93c5fd",
     textDecoration: "none",
     fontWeight: 600,
   },
+
+  // Main section title styling
   sectionTitle: {
     marginTop: 0,
     marginBottom: 10,
   },
+
+  // Short descriptive paragraph shown under section titles
   sectionDescription: {
     marginTop: 0,
     marginBottom: 18,
     opacity: 0.9,
     lineHeight: 1.5,
   },
+
+  // Subheading used inside advanced settings
   subsectionTitle: {
     fontWeight: 700,
     marginBottom: 14,
     fontSize: 16,
   },
+
+  // Main card container used for form and result sections
   card: {
     background: "#121a2a",
     padding: 28,
@@ -514,6 +601,8 @@ const styles = {
     marginBottom: 20,
     boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
   },
+
+  // Special card explaining how multiplayer works
   explainerCard: {
     marginTop: 20,
     marginBottom: 8,
@@ -522,55 +611,75 @@ const styles = {
     background: "#0f172a",
     border: "1px solid #23304c",
   },
+
+  // Title inside the explainer card
   explainerTitle: {
     marginTop: 0,
     marginBottom: 16,
     fontSize: 20,
   },
+
+  // Grid used to lay out the explainer steps
   explainerGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
     gap: 14,
   },
+
+  // Individual explainer step card
   explainerBlock: {
     background: "#111827",
     border: "1px solid #334155",
     borderRadius: 10,
     padding: 14,
   },
+
+  // Heading for each explainer step
   explainerStep: {
     fontWeight: 700,
     marginBottom: 8,
     color: "#93c5fd",
   },
+
+  // Paragraph text inside each explainer block
   explainerText: {
     margin: 0,
     lineHeight: 1.6,
     opacity: 0.92,
     fontSize: 14,
   },
+
+  // Wrapper for the advanced settings section
   advancedSection: {
     marginTop: 18,
     paddingTop: 18,
     borderTop: "1px solid #23304c",
   },
+
+  // Reusable grid layout for groups of inputs
   grid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
     gap: 16,
   },
+
+  // Label styling for form fields
   label: {
     display: "block",
     marginBottom: 6,
     marginTop: 10,
     fontWeight: 600,
   },
+
+  // Small helper text shown under inputs
   helpText: {
     fontSize: 13,
     lineHeight: 1.45,
     opacity: 0.82,
     marginTop: 6,
   },
+
+  // Shared input styling for text fields, number fields, and dropdowns
   input: {
     width: "100%",
     padding: 11,
@@ -581,6 +690,8 @@ const styles = {
     marginBottom: 4,
     boxSizing: "border-box",
   },
+
+  // Button used to expand or collapse advanced settings
   advancedToggle: {
     marginTop: 18,
     padding: "10px 14px",
@@ -591,6 +702,8 @@ const styles = {
     fontWeight: 700,
     cursor: "pointer",
   },
+
+  // Layout for grouped checkbox controls
   checkboxGroup: {
     display: "flex",
     gap: 16,
@@ -598,11 +711,15 @@ const styles = {
     marginTop: 14,
     marginBottom: 10,
   },
+
+  // Individual checkbox row styling
   checkboxRow: {
     display: "flex",
     gap: 8,
     alignItems: "center",
   },
+
+  // Main green button used to create the room
   startButton: {
     display: "block",
     width: "100%",
@@ -623,6 +740,8 @@ const styles = {
     opacity: 1,
     outline: "none",
   },
+
+  // Disabled version of the create-room button shown while loading/creating
   disabledStartButton: {
     display: "block",
     width: "100%",
@@ -640,6 +759,8 @@ const styles = {
     filter: "grayscale(0.15)",
     boxShadow: "none",
   },
+
+  // General blue button used for actions such as opening the room
   button: {
     padding: "12px 16px",
     borderRadius: 8,
@@ -650,6 +771,8 @@ const styles = {
     cursor: "pointer",
     marginTop: 8,
   },
+
+  // Error message box styling
   error: {
     background: "rgba(239,68,68,0.15)",
     color: "#fecaca",
@@ -658,6 +781,8 @@ const styles = {
     marginBottom: 20,
     border: "1px solid rgba(239,68,68,0.25)",
   },
+
+  // White container behind the QR code for visibility
   qrWrap: {
     background: "white",
     display: "inline-block",
@@ -665,12 +790,16 @@ const styles = {
     borderRadius: 12,
     marginTop: 16,
   },
+
+  // Layout for room-created action buttons
   actionRow: {
     display: "flex",
     gap: 12,
     flexWrap: "wrap",
     marginTop: 18,
   },
+
+  // Styling for lines of room information such as code and join URL
   infoLine: {
     lineHeight: 1.6,
     wordBreak: "break-word",

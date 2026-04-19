@@ -11,7 +11,7 @@ services:
       - mysql_data:/var/lib/mysql #Save mysql data so it dosent vanish when container is removed
       - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql #file for creating database
     ports:
-      - "3306:3306"
+      - "3308:3306"
 
   client:
     build:
@@ -21,7 +21,6 @@ services:
       - "3000:3000"
     environment:
       - REACT_APP_API_URL=http://localhost:5000
-      - HOST=0.0.0.0
       - CHOKIDAR_USEPOLLING=true
       # Helps file watching on Windows/WSL/Docker Desktop
       - WATCHPACK_POLLING=true
