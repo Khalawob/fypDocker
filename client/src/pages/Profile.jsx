@@ -1,14 +1,30 @@
+// Import React hooks:
+// useEffect is used to run side effects when the component loads,
+// useState is used to store local component state values.
 import { useEffect, useState } from "react";
+
+// Import Link from React Router for navigation links
 import { Link } from "react-router-dom";
+
+// Import the background context so the selected user background can be applied to this page
 import { useBackground } from "../context/BackgroundContext";
 
+// Base API URL used for backend requests.
+// It uses an environment variable if available, otherwise falls back to localhost for development.
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
+// Main Profile page component
 export default function Profile() {
+  // Read the auth token from localStorage so authenticated API requests can be made
   const token = localStorage.getItem("token");
+
+  // Get the selected background and a helper function to refresh it after changes
   const { selectedBackground, refreshBackground } = useBackground();
 
+  // Stores the full profile data returned by the backend
   const [profile, setProfile] = useState(null);
+
+  // Stores editable profile form values when the user enters edit mode
   const [form, setForm] = useState({
     display_name: "",
     bio: "",
@@ -18,22 +34,39 @@ export default function Profile() {
     preferred_difficulty: "",
   });
 
+  // Stores the list of available/unlocked backgrounds for the user
   const [backgrounds, setBackgrounds] = useState([]);
+
+  // Tracks whether background data is currently loading
   const [backgroundLoading, setBackgroundLoading] = useState(true);
+
+  // Stores the background currently being selected so the UI can show a loading state
   const [selectingBackgroundId, setSelectingBackgroundId] = useState("");
 
+  // Tracks whether the main profile data is currently loading
   const [loading, setLoading] = useState(true);
+
+  // Tracks whether the profile update form is currently being saved
   const [saving, setSaving] = useState(false);
+
+  // Controls whether the page is showing view mode or edit mode
   const [editing, setEditing] = useState(false);
+
+  // Stores any error message to display to the user
   const [error, setError] = useState("");
+
+  // Stores any success message to display to the user
   const [success, setSuccess] = useState("");
 
+  // Run once when the page first loads.
+  // This loads both the user's profile information and their available backgrounds.
   useEffect(() => {
     loadProfile();
     loadBackgrounds();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Loads the current user's profile data from the backend
   async function loadProfile() {
     try {
       setLoading(true);
@@ -49,11 +82,13 @@ export default function Profile() {
 
       const data = await res.json().catch(() => ({}));
 
+      // Show an error if the profile could not be loaded
       if (!res.ok) {
         setError(data?.message || "Failed to load profile");
         return;
       }
 
+      // Save the full profile data and also prefill the edit form with the same values
       setProfile(data);
       setForm({
         display_name: data.display_name || "",
@@ -70,6 +105,7 @@ export default function Profile() {
     }
   }
 
+  // Loads the user's background unlock/selection information from the backend
   async function loadBackgrounds() {
     try {
       setBackgroundLoading(true);
@@ -83,16 +119,19 @@ export default function Profile() {
 
       const data = await res.json().catch(() => ({}));
 
+      // If the request fails, just stop without replacing current UI with an error
       if (!res.ok) return;
 
       setBackgrounds(Array.isArray(data?.backgrounds) ? data.backgrounds : []);
     } catch (err) {
+      // Log background loading failures for debugging
       console.error("Failed to load backgrounds");
     } finally {
       setBackgroundLoading(false);
     }
   }
 
+  // Generic form change handler for edit mode inputs
   function handleChange(e) {
     const { name, value } = e.target;
     setForm((prev) => ({
@@ -101,6 +140,7 @@ export default function Profile() {
     }));
   }
 
+  // Cancels edit mode and restores the form values back to the current saved profile data
   function cancelEdit() {
     if (!profile) return;
 
@@ -118,6 +158,7 @@ export default function Profile() {
     setSuccess("");
   }
 
+  // Saves the updated profile details to the backend
   async function saveProfile(e) {
     e.preventDefault();
 
@@ -126,6 +167,7 @@ export default function Profile() {
       setError("");
       setSuccess("");
 
+      // Build the payload, converting empty optional numeric/select values to null
       const payload = {
         display_name: form.display_name,
         bio: form.bio,
@@ -152,11 +194,13 @@ export default function Profile() {
 
       const data = await res.json().catch(() => ({}));
 
+      // Show an error if the update fails
       if (!res.ok) {
         setError(data?.message || "Failed to update profile");
         return;
       }
 
+      // Show success feedback, leave edit mode, and reload the latest profile data
       setSuccess("Profile updated successfully");
       setEditing(false);
       await loadProfile();
@@ -167,7 +211,9 @@ export default function Profile() {
     }
   }
 
+  // Selects a background for the user's profile
   async function selectBackground(backgroundId) {
+    // Create a stable key for the currently requested selection
     const selectionKey = backgroundId === null ? "default" : String(backgroundId);
 
     try {
@@ -188,17 +234,20 @@ export default function Profile() {
 
       const data = await res.json().catch(() => ({}));
 
+      // Show an error if background selection fails
       if (!res.ok) {
         setError(data?.message || "Failed to select background");
         return;
       }
 
+      // Show success feedback depending on whether the default or a custom background was chosen
       setSuccess(
         backgroundId === null
           ? "Default background selected successfully"
           : "Background selected successfully"
       );
 
+      // Reload profile/background data and refresh the global background context
       await loadBackgrounds();
       await loadProfile();
       await refreshBackground();
@@ -209,6 +258,7 @@ export default function Profile() {
     }
   }
 
+  // Formats a date value into a readable local date string
   function formatDate(value) {
     if (!value) return "Unknown";
     const date = new Date(value);
@@ -216,6 +266,8 @@ export default function Profile() {
     return date.toLocaleDateString();
   }
 
+  // Build the background list shown in the UI.
+  // A built-in default background option is added before the fetched backgrounds.
   const backgroundOptions = [
     {
       background_id: null,
@@ -227,8 +279,12 @@ export default function Profile() {
     ...backgrounds,
   ];
 
+  // Safely read the badges array from the profile
   const badges = Array.isArray(profile?.badges) ? profile.badges : [];
 
+  // Build the final page style object.
+  // It starts with the default page styles and conditionally adds a selected background image
+  // with a dark overlay so the content remains readable.
   const pageStyle = {
     ...styles.page,
     ...(selectedBackground?.image_url
@@ -241,9 +297,11 @@ export default function Profile() {
       : {}),
   };
 
+  // Render the Profile page UI
   return (
     <div style={pageStyle}>
       <div style={styles.container}>
+        {/* Header section showing page title, subtitle, and navigation/edit actions */}
         <div style={styles.headerRow}>
           <div>
             <h1 style={styles.title}>My Profile</h1>
@@ -260,6 +318,7 @@ export default function Profile() {
               My Sets
             </Link>
 
+            {/* Show the edit button only when profile data is loaded and the page is not already in edit mode */}
             {!editing && !loading && profile && (
               <button
                 style={styles.editButton}
@@ -275,12 +334,15 @@ export default function Profile() {
           </div>
         </div>
 
+        {/* Top-level page states for loading, error, and success messages */}
         {loading && <div style={styles.card}>Loading profile...</div>}
         {error && <div style={styles.error}>{error}</div>}
         {success && <div style={styles.success}>{success}</div>}
 
+        {/* Read-only profile view mode */}
         {!loading && !error && profile && !editing && (
           <div style={styles.grid}>
+            {/* Card showing main profile information */}
             <div style={styles.card}>
               <h2 style={styles.sectionTitle}>Profile Information</h2>
 
@@ -343,6 +405,7 @@ export default function Profile() {
               </div>
             </div>
 
+            {/* Card showing activity/progress statistics */}
             <div style={styles.card}>
               <h2 style={styles.sectionTitle}>Progress Stats</h2>
 
@@ -384,6 +447,7 @@ export default function Profile() {
               </div>
             </div>
 
+            {/* Wide card showing badges and their unlock status */}
             <div style={styles.cardWide}>
               <h2 style={styles.sectionTitle}>Badges</h2>
 
@@ -392,6 +456,7 @@ export default function Profile() {
               ) : (
                 <div style={styles.badgesGrid}>
                   {badges.map((badge) => {
+                    // Convert numeric flag to boolean for easier conditional rendering
                     const isEarned = Number(badge.is_earned) === 1;
 
                     return (
@@ -446,6 +511,7 @@ export default function Profile() {
               )}
             </div>
 
+            {/* Wide card showing background unlocks and selection controls */}
             <div style={styles.cardWide}>
               <h2 style={styles.sectionTitle}>Unlocked Backgrounds</h2>
 
@@ -456,8 +522,11 @@ export default function Profile() {
               ) : (
                 <div style={styles.backgroundGrid}>
                   {backgroundOptions.map((bg) => {
+                    // Convert numeric flags to booleans for easier UI logic
                     const unlocked = Number(bg.is_unlocked) === 1;
                     const selected = Number(bg.is_selected) === 1;
+
+                    // Create a stable selection key used for loading state matching
                     const selectionKey =
                       bg.background_id === null ? "default" : String(bg.background_id);
 
@@ -524,6 +593,7 @@ export default function Profile() {
           </div>
         )}
 
+        {/* Editable profile form shown when the user enters edit mode */}
         {!loading && !error && profile && editing && (
           <form onSubmit={saveProfile} style={styles.card}>
             <h2 style={styles.sectionTitle}>Edit Profile</h2>
@@ -629,17 +699,24 @@ export default function Profile() {
   );
 }
 
+// Centralised styles object for the Profile page.
+// Keeps layout and visual styling separate from the component logic.
 const styles = {
+  // Full page wrapper styling
   page: {
     minHeight: "100vh",
     background: "#0b1220",
     color: "white",
     padding: 24,
   },
+
+  // Main content container that centres the page and limits width
   container: {
     maxWidth: 1000,
     margin: "0 auto",
   },
+
+  // Header section layout
   headerRow: {
     display: "flex",
     justifyContent: "space-between",
@@ -648,30 +725,42 @@ const styles = {
     flexWrap: "wrap",
     marginBottom: 24,
   },
+
+  // Main page title styling
   title: {
     margin: 0,
   },
+
+  // Subtitle text under the page title
   subtitle: {
     marginTop: 8,
     opacity: 0.9,
     lineHeight: 1.5,
   },
+
+  // Layout for header action buttons
   headerButtons: {
     display: "flex",
     gap: 10,
     flexWrap: "wrap",
   },
+
+  // Main responsive grid for profile content cards
   grid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
     gap: 16,
   },
+
+  // Standard card styling
   card: {
     background: "#121a2a",
     padding: 20,
     borderRadius: 12,
     boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
   },
+
+  // Wide card styling spanning the full grid width
   cardWide: {
     background: "#121a2a",
     padding: 20,
@@ -679,13 +768,19 @@ const styles = {
     boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
     gridColumn: "1 / -1",
   },
+
+  // Shared section heading styling
   sectionTitle: {
     marginTop: 0,
     marginBottom: 20,
   },
+
+  // Wrapper for avatar or avatar placeholder
   avatarWrap: {
     marginBottom: 20,
   },
+
+  // Avatar image styling
   avatar: {
     width: 96,
     height: 96,
@@ -693,6 +788,8 @@ const styles = {
     objectFit: "cover",
     border: "3px solid rgba(255,255,255,0.12)",
   },
+
+  // Placeholder avatar styling when no avatar image exists
   avatarPlaceholder: {
     width: 96,
     height: 96,
@@ -706,9 +803,13 @@ const styles = {
     fontWeight: 700,
     border: "3px solid rgba(255,255,255,0.12)",
   },
+
+  // Generic content block spacing
   block: {
     marginBottom: 16,
   },
+
+  // Small uppercase label styling used in read-only cards
   label: {
     fontSize: 13,
     textTransform: "uppercase",
@@ -716,35 +817,49 @@ const styles = {
     opacity: 0.8,
     marginBottom: 8,
   },
+
+  // Standard text styling for profile values
   text: {
     lineHeight: 1.6,
     whiteSpace: "pre-wrap",
     opacity: 0.95,
   },
+
+  // Large stat number styling
   bigStat: {
     fontSize: 32,
     fontWeight: 700,
     lineHeight: 1.2,
   },
+
+  // Standard form group spacing
   formGroup: {
     marginBottom: 16,
   },
+
+  // Half-width form group used in side-by-side layouts
   formGroupHalf: {
     flex: 1,
     minWidth: 220,
   },
+
+  // Row layout for grouped form inputs
   formRow: {
     display: "flex",
     gap: 16,
     flexWrap: "wrap",
     marginBottom: 16,
   },
+
+  // Label styling for editable form fields
   inputLabel: {
     display: "block",
     marginBottom: 8,
     fontSize: 14,
     fontWeight: 600,
   },
+
+  // Shared text input/select styling
   input: {
     width: "100%",
     padding: "12px 14px",
@@ -756,6 +871,8 @@ const styles = {
     boxSizing: "border-box",
     outline: "none",
   },
+
+  // Shared textarea styling
   textarea: {
     width: "100%",
     padding: "12px 14px",
@@ -769,12 +886,16 @@ const styles = {
     resize: "vertical",
     fontFamily: "inherit",
   },
+
+  // Button row layout
   buttonRow: {
     display: "flex",
     gap: 10,
     flexWrap: "wrap",
     marginTop: 8,
   },
+
+  // Styled navigation link button
   linkButton: {
     padding: "10px 14px",
     borderRadius: 8,
@@ -783,6 +904,8 @@ const styles = {
     textDecoration: "none",
     fontWeight: 600,
   },
+
+  // Main green action button styling
   primaryButton: {
     padding: "10px 14px",
     borderRadius: 8,
@@ -792,6 +915,8 @@ const styles = {
     cursor: "pointer",
     fontWeight: 700,
   },
+
+  // Secondary button styling
   secondaryButton: {
     padding: "10px 14px",
     borderRadius: 8,
@@ -801,6 +926,8 @@ const styles = {
     cursor: "pointer",
     fontWeight: 700,
   },
+
+  // Disabled button styling for unavailable background choices
   disabledButton: {
     padding: "10px 14px",
     borderRadius: 8,
@@ -810,6 +937,8 @@ const styles = {
     cursor: "not-allowed",
     fontWeight: 700,
   },
+
+  // Edit profile button styling
   editButton: {
     padding: "10px 14px",
     borderRadius: 8,
@@ -821,6 +950,8 @@ const styles = {
     border: "none",
     cursor: "pointer",
   },
+
+  // Red button styling used for cancel actions in edit mode
   deleteButton: {
     padding: "10px 14px",
     borderRadius: 8,
@@ -830,6 +961,8 @@ const styles = {
     cursor: "pointer",
     fontWeight: 700,
   },
+
+  // Error message box styling
   error: {
     background: "rgba(239,68,68,0.15)",
     color: "#fecaca",
@@ -838,6 +971,8 @@ const styles = {
     marginBottom: 16,
     border: "1px solid rgba(239,68,68,0.25)",
   },
+
+  // Success message box styling
   success: {
     background: "rgba(34,197,94,0.15)",
     color: "#bbf7d0",
@@ -846,11 +981,15 @@ const styles = {
     marginBottom: 16,
     border: "1px solid rgba(34,197,94,0.25)",
   },
+
+  // Grid layout for badge cards
   badgesGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
     gap: 16,
   },
+
+  // Individual badge card styling
   badgeCard: {
     background: "#0f172a",
     border: "1px solid #334155",
@@ -860,6 +999,8 @@ const styles = {
     flexDirection: "column",
     gap: 12,
   },
+
+  // Badge image styling
   badgeImage: {
     width: "100%",
     height: 120,
@@ -870,6 +1011,8 @@ const styles = {
     padding: 10,
     boxSizing: "border-box",
   },
+
+  // Placeholder styling for locked badges without icon images
   badgePlaceholder: {
     width: "100%",
     height: 120,
@@ -881,31 +1024,43 @@ const styles = {
     justifyContent: "center",
     fontSize: 40,
   },
+
+  // Layout for badge text content
   badgeContent: {
     display: "flex",
     flexDirection: "column",
     gap: 6,
   },
+
+  // Header row inside each badge card
   badgeHeaderRow: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "flex-start",
     gap: 10,
   },
+
+  // Badge title styling
   badgeName: {
     fontWeight: 700,
     fontSize: 16,
   },
+
+  // Badge description text styling
   badgeDescription: {
     opacity: 0.9,
     lineHeight: 1.5,
     fontSize: 14,
   },
+
+  // Badge earned date styling
   badgeEarnedAt: {
     fontSize: 13,
     color: "#cbd5e1",
     opacity: 0.9,
   },
+
+  // Status pill styling for earned badges
   earnedBadgeStatus: {
     display: "inline-block",
     padding: "6px 10px",
@@ -917,6 +1072,8 @@ const styles = {
     border: "1px solid rgba(34,197,94,0.35)",
     whiteSpace: "nowrap",
   },
+
+  // Status pill styling for locked badges
   lockedBadgeStatus: {
     display: "inline-block",
     padding: "6px 10px",
@@ -928,17 +1085,23 @@ const styles = {
     border: "1px solid rgba(148,163,184,0.25)",
     whiteSpace: "nowrap",
   },
+
+  // Grid layout for background cards
   backgroundGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
     gap: 16,
   },
+
+  // Individual background card styling
   backgroundCard: {
     background: "#0f172a",
     border: "1px solid #334155",
     borderRadius: 12,
     padding: 14,
   },
+
+  // Preview area showing a background thumbnail
   backgroundPreview: {
     width: "100%",
     height: 120,
@@ -949,13 +1112,19 @@ const styles = {
     marginBottom: 12,
     border: "1px solid #334155",
   },
+
+  // Background name styling
   backgroundName: {
     fontWeight: 700,
     marginBottom: 10,
   },
+
+  // Row holding status badges for backgrounds
   backgroundStatusRow: {
     marginBottom: 12,
   },
+
+  // Status badge styling for selected background
   selectedBadge: {
     display: "inline-block",
     padding: "6px 10px",
@@ -966,6 +1135,8 @@ const styles = {
     fontWeight: 700,
     border: "1px solid rgba(34,197,94,0.35)",
   },
+
+  // Status badge styling for unlocked but not selected backgrounds
   unlockedBadge: {
     display: "inline-block",
     padding: "6px 10px",
@@ -976,6 +1147,8 @@ const styles = {
     fontWeight: 700,
     border: "1px solid rgba(59,130,246,0.35)",
   },
+
+  // Status badge styling for locked backgrounds
   lockedBadge: {
     display: "inline-block",
     padding: "6px 10px",

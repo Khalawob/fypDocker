@@ -1,31 +1,68 @@
+// Import React hooks:
+// useMemo is used to calculate derived values efficiently,
+// useState is used to store local component state values.
 import { useMemo, useState } from "react";
+
+// Import React Router helpers:
+// Link is used for clickable navigation links,
+// useNavigate is used for programmatic navigation,
+// useParams is used to read the setId from the current route.
 import { Link, useNavigate, useParams } from "react-router-dom";
+
+// Import the background context so the user's selected background can be applied to this page
 import { useBackground } from "../context/BackgroundContext";
 
+// Base API URL used for backend requests.
+// It uses an environment variable if available, otherwise falls back to localhost for development.
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
+// Main page component for importing flashcards from document text
 export default function ImportDocument() {
+  // Read the setId from the current route so imported cards can be added to the correct set
   const { setId } = useParams();
+
+  // React Router navigation helper used to return the user to the set page after saving cards
   const navigate = useNavigate();
+
+  // Read the auth token from localStorage so authenticated API requests can be made
   const token = localStorage.getItem("token");
 
+  // Stores the extracted or manually pasted document text that will be used for flashcard generation
   const [text, setText] = useState("");
+
+  // Stores the maximum number of draft flashcards the user wants to generate
   const [maxCards, setMaxCards] = useState(8);
 
+  // Stores the generated draft flashcards before the user saves them
   const [drafts, setDrafts] = useState([]);
+
+  // Stores the local IDs of draft cards currently selected for saving
   const [selectedIds, setSelectedIds] = useState([]);
 
+  // Tracks whether the app is currently generating draft flashcards
   const [generating, setGenerating] = useState(false);
+
+  // Tracks whether selected flashcards are currently being saved to the backend
   const [saving, setSaving] = useState(false);
 
+  // Stores any error message to show on screen
   const [error, setError] = useState("");
+
+  // Stores any success message to show on screen
   const [success, setSuccess] = useState("");
 
+  // Stores the file selected by the user for document text extraction
   const [selectedFile, setSelectedFile] = useState(null);
+
+  // Tracks whether the app is currently extracting text from the uploaded file
   const [extracting, setExtracting] = useState(false);
 
+  // Get the selected custom background from the shared background context
   const { selectedBackground } = useBackground();
 
+  // Build the final page style object.
+  // It starts with the default page styles and conditionally adds a selected background image
+  // with a dark overlay so text remains readable.
   const pageStyle = {
     ...styles.page,
     ...(selectedBackground?.image_url
@@ -38,11 +75,14 @@ export default function ImportDocument() {
       : {}),
   };
 
+  // Calculate how many currently visible draft cards are selected for saving.
+  // useMemo avoids recalculating this on every render unless drafts or selectedIds change.
   const selectedCount = useMemo(
     () => drafts.filter((d) => selectedIds.includes(d.local_id)).length,
     [drafts, selectedIds]
   );
 
+  // Validates whether the current document text is suitable for generating flashcards
   function validateGenerate() {
     if (!text.trim()) return "Please paste some document text first.";
     if (text.trim().split(/\s+/).length < 8) {
@@ -51,15 +91,18 @@ export default function ImportDocument() {
     return "";
   }
 
+  // Handles extracting raw text from an uploaded .docx or .pdf file
   async function handleExtractDocument() {
     setError("");
     setSuccess("");
 
+    // Make sure the user selected a file first
     if (!selectedFile) {
       setError("Please choose a .docx or .pdf file first.");
       return;
     }
 
+    // Check that the uploaded file has a supported extension
     const fileName = selectedFile.name ? selectedFile.name.toLowerCase() : "";
     const isDocx = fileName.endsWith(".docx");
     const isPdf = fileName.endsWith(".pdf");
@@ -72,6 +115,7 @@ export default function ImportDocument() {
     try {
       setExtracting(true);
 
+      // Build form data so the file can be uploaded as multipart/form-data
       const formData = new FormData();
       formData.append("document", selectedFile);
 
@@ -88,11 +132,13 @@ export default function ImportDocument() {
 
       const data = await res.json().catch(() => ({}));
 
+      // Show an error if text extraction fails
       if (!res.ok) {
         setError(data?.message || "Failed to extract document text");
         return;
       }
 
+      // Store the extracted text, clear any old drafts, and show success feedback
       setText(data?.text || "");
       setDrafts([]);
       setSelectedIds([]);
@@ -104,6 +150,7 @@ export default function ImportDocument() {
     }
   }
 
+  // Handles generating draft flashcards from the current text
   async function handleGenerate(e) {
     e.preventDefault();
     setError("");
@@ -132,13 +179,17 @@ export default function ImportDocument() {
 
       const data = await res.json().catch(() => ({}));
 
+      // Show an error if generation fails
       if (!res.ok) {
         setError(data?.message || data?.error || "Failed to generate flashcards");
         return;
       }
 
+      // Read the returned draft flashcards safely
       const incomingDrafts = Array.isArray(data?.drafts) ? data.drafts : [];
 
+      // Add a local ID to each draft so the frontend can track edits, deletion, and selection
+      // Then sort drafts so stronger cards appear first
       const withIds = incomingDrafts
         .map((card, index) => ({
           local_id: `${Date.now()}-${index}`,
@@ -152,8 +203,11 @@ export default function ImportDocument() {
         .sort((a, b) => (b.score ?? -999) - (a.score ?? -999));
 
       setDrafts(withIds);
+
+      // By default, select every generated draft for saving
       setSelectedIds(withIds.map((card) => card.local_id));
 
+      // Show feedback depending on whether any good drafts were generated
       if (withIds.length === 0) {
         setSuccess("No strong flashcards were found. Try shorter, more definition-based text.");
       } else {
@@ -166,6 +220,7 @@ export default function ImportDocument() {
     }
   }
 
+  // Updates a specific field in a specific draft card
   function updateDraft(localId, field, value) {
     setDrafts((prev) =>
       prev.map((draft) =>
@@ -174,11 +229,13 @@ export default function ImportDocument() {
     );
   }
 
+  // Removes a draft card entirely and also removes it from the selected list
   function removeDraft(localId) {
     setDrafts((prev) => prev.filter((draft) => draft.local_id !== localId));
     setSelectedIds((prev) => prev.filter((id) => id !== localId));
   }
 
+  // Toggles whether a draft card is selected for saving
   function toggleSelected(localId) {
     setSelectedIds((prev) =>
       prev.includes(localId)
@@ -187,14 +244,17 @@ export default function ImportDocument() {
     );
   }
 
+  // Selects every draft card
   function selectAll() {
     setSelectedIds(drafts.map((draft) => draft.local_id));
   }
 
+  // Clears all selected draft cards
   function clearSelection() {
     setSelectedIds([]);
   }
 
+  // Cleans and prepares the selected draft cards so only valid question/answer pairs are sent to the backend
   function cleanCardsForSave() {
     return drafts
       .filter((draft) => selectedIds.includes(draft.local_id))
@@ -205,12 +265,14 @@ export default function ImportDocument() {
       .filter((draft) => draft.question && draft.answer);
   }
 
+  // Saves the currently selected valid draft cards to the backend
   async function handleSaveSelected() {
     setError("");
     setSuccess("");
 
     const cards = cleanCardsForSave();
 
+    // Make sure at least one valid selected card exists before saving
     if (cards.length === 0) {
       setError("Please select at least one valid flashcard to save.");
       return;
@@ -230,11 +292,13 @@ export default function ImportDocument() {
 
       const data = await res.json().catch(() => ({}));
 
+      // Show an error if saving fails
       if (!res.ok) {
         setError(data?.message || data?.error || "Failed to save flashcards");
         return;
       }
 
+      // Show success feedback and return to the set page shortly after
       setSuccess(`${data?.inserted_count || cards.length} flashcards saved successfully.`);
       setTimeout(() => {
         navigate(`/sets/${setId}`);
@@ -246,6 +310,7 @@ export default function ImportDocument() {
     }
   }
 
+  // Converts a numeric draft score into a simple user-friendly quality label
   function getScoreLabel(score) {
     if (score === null || score === undefined || Number.isNaN(score)) return "Unscored";
     if (score >= 5) return "Strong";
@@ -253,9 +318,11 @@ export default function ImportDocument() {
     return "Weak";
   }
 
+  // Render the Import Document page UI
   return (
     <div style={pageStyle}>
       <div style={styles.container}>
+        {/* Header row with page title and navigation buttons */}
         <div style={styles.headerRow}>
           <h1 style={styles.title}>Import From Document</h1>
           <div style={styles.headerButtons}>
@@ -268,6 +335,7 @@ export default function ImportDocument() {
           </div>
         </div>
 
+        {/* Card for document upload and text extraction */}
         <div style={styles.card}>
           <p style={styles.description}>
             Upload a document or paste text, generate draft flashcards, review them, then save the good ones.
@@ -300,6 +368,7 @@ export default function ImportDocument() {
           </div>
         </div>
 
+        {/* Main form for generating draft flashcards from the current text */}
         <form onSubmit={handleGenerate} style={styles.card}>
           {error && <div style={styles.error}>{error}</div>}
           {success && <div style={styles.success}>{success}</div>}
@@ -338,6 +407,7 @@ export default function ImportDocument() {
           </div>
         </form>
 
+        {/* Review section only appears once at least one draft flashcard exists */}
         {drafts.length > 0 && (
           <div style={styles.card}>
             <div style={styles.reviewHeader}>
@@ -358,10 +428,12 @@ export default function ImportDocument() {
               </div>
             </div>
 
+            {/* Summary showing how many draft cards are currently selected */}
             <div style={styles.selectionMeta}>
               {selectedCount} selected out of {drafts.length}
             </div>
 
+            {/* List of editable generated draft flashcards */}
             <div style={styles.draftList}>
               {drafts.map((draft, index) => (
                 <div key={draft.local_id} style={styles.draftCard}>
@@ -419,6 +491,7 @@ export default function ImportDocument() {
               ))}
             </div>
 
+            {/* Final save button for sending selected reviewed draft cards into the set */}
             <div style={styles.buttonRow}>
               <button
                 type="button"
@@ -436,17 +509,24 @@ export default function ImportDocument() {
   );
 }
 
+// Centralised styles object for the Import Document page.
+// Keeps layout and appearance styling separate from the main component logic.
 const styles = {
+  // Full page wrapper styling
   page: {
     minHeight: "100vh",
     background: "#0b1220",
     color: "white",
     padding: 24,
   },
+
+  // Main container that centres content and limits width
   container: {
     maxWidth: 900,
     margin: "0 auto",
   },
+
+  // Header row layout for title and action buttons
   headerRow: {
     display: "flex",
     justifyContent: "space-between",
@@ -455,14 +535,20 @@ const styles = {
     flexWrap: "wrap",
     marginBottom: 24,
   },
+
+  // Container for the header navigation buttons
   headerButtons: {
     display: "flex",
     gap: 12,
     flexWrap: "wrap",
   },
+
+  // Main page title styling
   title: {
     margin: 0,
   },
+
+  // Shared card styling for all major content sections
   card: {
     background: "#121a2a",
     padding: 24,
@@ -470,18 +556,24 @@ const styles = {
     boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
     marginBottom: 24,
   },
+
+  // Description text shown near the top of cards
   description: {
     marginTop: 0,
     marginBottom: 20,
     opacity: 0.9,
     lineHeight: 1.5,
   },
+
+  // Shared label styling for fields
   label: {
     display: "block",
     fontWeight: 600,
     marginBottom: 6,
     marginTop: 14,
   },
+
+  // File input styling
   fileInput: {
     width: "100%",
     padding: 12,
@@ -491,6 +583,8 @@ const styles = {
     color: "white",
     boxSizing: "border-box",
   },
+
+  // Large textarea styling used for the full document text input
   largeTextarea: {
     width: "100%",
     minHeight: 220,
@@ -503,6 +597,8 @@ const styles = {
     resize: "vertical",
     boxSizing: "border-box",
   },
+
+  // Standard textarea styling used for draft question/answer editing
   textarea: {
     width: "100%",
     minHeight: 110,
@@ -515,21 +611,29 @@ const styles = {
     resize: "vertical",
     boxSizing: "border-box",
   },
+
+  // Small helper text styling
   helpText: {
     fontSize: 13,
     opacity: 0.8,
     marginTop: 6,
     lineHeight: 1.45,
   },
+
+  // Row layout used for grouped fields
   row: {
     display: "flex",
     gap: 16,
     marginTop: 14,
     flexWrap: "wrap",
   },
+
+  // Small field wrapper used around compact form controls
   fieldBlock: {
     minWidth: 180,
   },
+
+  // Shared select dropdown styling
   select: {
     width: "100%",
     padding: "12px 14px",
@@ -539,12 +643,16 @@ const styles = {
     color: "white",
     outline: "none",
   },
+
+  // Layout row used for action buttons
   buttonRow: {
     display: "flex",
     gap: 12,
     flexWrap: "wrap",
     marginTop: 24,
   },
+
+  // Primary green action button styling
   primaryButton: {
     padding: "14px 18px",
     borderRadius: 10,
@@ -555,6 +663,8 @@ const styles = {
     fontWeight: 700,
     fontSize: 16,
   },
+
+  // Secondary button styling
   secondaryButton: {
     padding: "14px 18px",
     borderRadius: 10,
@@ -565,6 +675,8 @@ const styles = {
     fontWeight: 700,
     fontSize: 16,
   },
+
+  // Smaller secondary button styling used in the review section
   secondaryButtonSmall: {
     padding: "10px 14px",
     borderRadius: 8,
@@ -574,6 +686,8 @@ const styles = {
     cursor: "pointer",
     fontWeight: 600,
   },
+
+  // Red delete button styling used for removing draft cards
   deleteButton: {
     padding: "10px 14px",
     borderRadius: 8,
@@ -583,6 +697,8 @@ const styles = {
     cursor: "pointer",
     fontWeight: 600,
   },
+
+  // Styled link button used in the page header
   linkButton: {
     padding: "10px 14px",
     borderRadius: 8,
@@ -591,6 +707,8 @@ const styles = {
     textDecoration: "none",
     fontWeight: 600,
   },
+
+  // Error message box styling
   error: {
     background: "rgba(239,68,68,0.15)",
     color: "#fecaca",
@@ -599,6 +717,8 @@ const styles = {
     marginBottom: 16,
     border: "1px solid rgba(239,68,68,0.25)",
   },
+
+  // Success message box styling
   success: {
     background: "rgba(34,197,94,0.15)",
     color: "#bbf7d0",
@@ -607,6 +727,8 @@ const styles = {
     marginBottom: 16,
     border: "1px solid rgba(34,197,94,0.25)",
   },
+
+  // Header layout for the draft review section
   reviewHeader: {
     display: "flex",
     justifyContent: "space-between",
@@ -614,35 +736,49 @@ const styles = {
     flexWrap: "wrap",
     alignItems: "center",
   },
+
+  // Layout for the review section action buttons
   reviewActions: {
     display: "flex",
     gap: 10,
     flexWrap: "wrap",
   },
+
+  // Section title styling used in the review section
   sectionTitle: {
     margin: 0,
   },
+
+  // Supporting text styling used below section titles
   sectionText: {
     marginTop: 6,
     opacity: 0.85,
     lineHeight: 1.45,
   },
+
+  // Text showing how many drafts are currently selected
   selectionMeta: {
     marginTop: 14,
     marginBottom: 14,
     fontWeight: 600,
     opacity: 0.95,
   },
+
+  // Grid layout for the list of generated draft cards
   draftList: {
     display: "grid",
     gap: 16,
   },
+
+  // Styling for each generated draft card container
   draftCard: {
     border: "1px solid #2b3550",
     borderRadius: 12,
     padding: 16,
     background: "#0b1220",
   },
+
+  // Top row inside each draft card for selection checkbox and metadata
   draftTopRow: {
     display: "flex",
     justifyContent: "space-between",
@@ -650,17 +786,23 @@ const styles = {
     flexWrap: "wrap",
     alignItems: "center",
   },
+
+  // Layout for the save-this-card checkbox label
   checkboxWrap: {
     display: "flex",
     alignItems: "center",
     gap: 8,
     fontWeight: 600,
   },
+
+  // Layout for grouped metadata badges
   metaGroup: {
     display: "flex",
     gap: 8,
     flexWrap: "wrap",
   },
+
+  // Badge styling for draft number and quality score
   metaBadge: {
     background: "#1e293b",
     color: "#bfdbfe",
@@ -670,6 +812,8 @@ const styles = {
     fontWeight: 600,
     border: "1px solid #334155",
   },
+
+  // Layout for actions inside each draft card
   inlineActions: {
     display: "flex",
     justifyContent: "flex-end",

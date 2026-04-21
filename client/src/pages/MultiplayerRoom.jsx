@@ -1,11 +1,30 @@
+// Import React hooks:
+// useEffect is used for side effects such as loading room data, connecting sockets, and running timers,
+// useMemo is used for memoised derived values,
+// useRef is used to store mutable values that persist across renders without causing rerenders,
+// useState is used to store local component state.
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// Import React Router helpers:
+// useParams reads the join code from the URL,
+// Link is used for clickable navigation,
+// useNavigate is used for programmatic navigation such as moving to a new room or back to sets.
 import { useParams, Link, useNavigate } from "react-router-dom";
+
+// Import the Socket.IO client so this multiplayer room can receive live room updates
 import { io } from "socket.io-client";
+
+// Import QRCodeCanvas so a QR code can be generated for easy room joining
 import { QRCodeCanvas } from "qrcode.react";
+
+// Import the background context so the user's selected background can be applied to this page
 import { useBackground } from "../context/BackgroundContext";
 
+// Base API URL used for backend requests.
+// It uses an environment variable if available, otherwise falls back to localhost for development.
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
+// Default theme values used when the set theme cannot be loaded
 const DEFAULT_THEME = {
   top_color: "#121a2a",
   bottom_color: "#0b1220",
@@ -14,6 +33,8 @@ const DEFAULT_THEME = {
   border_radius: "12px",
 };
 
+// Configuration object describing the available multiplayer prompt types.
+// These labels and descriptions are helpful for matching room behaviour to prompt settings.
 const PROMPT_TYPES = {
   NORMAL_HIDDEN: {
     label: "Hidden Answer",
@@ -53,38 +74,89 @@ const PROMPT_TYPES = {
   },
 };
 
+// Main page component for a live multiplayer room
 export default function MultiplayerRoom() {
+  // Read the join code from the URL
   const { joinCode } = useParams();
+
+  // React Router navigation helper used to move between routes programmatically
   const navigate = useNavigate();
+
+  // Read the auth token from localStorage so authenticated API/socket connections can be made
   const token = localStorage.getItem("token");
+
+  // Reference to the active Socket.IO connection
   const socketRef = useRef(null);
+
+  // Prevents multiple reconnect attempts from running at the same time
   const reconnectingRef = useRef(false);
 
+  // Get the selected custom background from the shared background context
   const { selectedBackground } = useBackground();
 
+  // Tracks whether the room is still loading
   const [loading, setLoading] = useState(true);
+
+  // Stores the main room data returned by the backend
   const [room, setRoom] = useState(null);
+
+  // Stores the list of room participants
   const [participants, setParticipants] = useState([]);
+
+  // Stores the current room step/card/phase data
   const [currentStep, setCurrentStep] = useState(null);
+
+  // Stores which participants have answered the current card
   const [answeredParticipants, setAnsweredParticipants] = useState([]);
+
+  // Stores the local user's typed answer
   const [answer, setAnswer] = useState("");
+
+  // Stores page-level error or status messages
   const [message, setMessage] = useState("");
+
+  // Stores inline validation messages such as empty answer warnings
   const [inlineMessage, setInlineMessage] = useState("");
+
+  // Stores the user's answer feedback after submission
   const [feedback, setFeedback] = useState(null);
+
+  // Stores the final leaderboard after the room finishes
   const [finishedLeaderboard, setFinishedLeaderboard] = useState(null);
+
+  // Stores the current local timer countdown in seconds
   const [localSeconds, setLocalSeconds] = useState(null);
+
+  // Stores the timer's initial/max seconds so the progress bar can be calculated
   const [timerMaxSeconds, setTimerMaxSeconds] = useState(null);
+
+  // Stores the active set theme so the room matches the selected set appearance
   const [setTheme, setSetTheme] = useState(DEFAULT_THEME);
+
+  // Tracks the current socket/room connection state
   const [connectionState, setConnectionState] = useState("connected");
+
+  // Tracks which host/player action button is currently running
   const [actionLoading, setActionLoading] = useState("");
+
+  // Controls whether the flashcard is currently animating between phases
   const [isFlipping, setIsFlipping] = useState(false);
+
+  // Stores the direction of the flip animation
   const [flipDirection, setFlipDirection] = useState("forward");
 
+  // Stores the previous phase so phase changes can trigger a flip animation
   const previousPhaseRef = useRef(null);
+
+  // Stores the timeout ID for clearing flip animation state
   const flipTimeoutRef = useRef(null);
 
+  // Normalise the room code from the URL into uppercase for consistent matching and requests
   const code = useMemo(() => String(joinCode || "").toUpperCase(), [joinCode]);
 
+  // Build the final page style object.
+  // It starts with the default page styles and conditionally adds a selected background image
+  // with a dark overlay so the content remains readable.
   const pageStyle = {
     ...styles.page,
     ...(selectedBackground?.image_url
@@ -97,6 +169,7 @@ export default function MultiplayerRoom() {
       : {}),
   };
 
+  // Loads the selected set's visual theme from the backend so room cards match the set styling
   async function loadSetTheme(setId) {
     if (!setId || !token) {
       setSetTheme(DEFAULT_THEME);
@@ -130,6 +203,7 @@ export default function MultiplayerRoom() {
     }
   }
 
+  // Applies a full room state payload from the backend or socket into component state
   function applyState(state) {
     setRoom(state.room || null);
     setParticipants(Array.isArray(state.participants) ? state.participants : []);
@@ -141,10 +215,12 @@ export default function MultiplayerRoom() {
     setConnectionState(state.room?.connection_status || "connected");
     setLoading(false);
 
+    // Load the set theme whenever the room state contains a set ID
     if (state.room?.set_id) {
       loadSetTheme(state.room.set_id);
     }
 
+    // Work out which timer value should be displayed based on phase and room state
     const nextTimer =
       state.current_step?.reveal_seconds ??
       state.current_step?.display_time_per_card ??
@@ -163,17 +239,20 @@ export default function MultiplayerRoom() {
     setLocalSeconds(timerValue);
     setTimerMaxSeconds(timerValue);
 
+    // Clear local answer/feedback when leaving test mode
     if (state.current_step?.phase !== "TEST") {
       setAnswer("");
       setFeedback(null);
       setInlineMessage("");
     }
 
+    // Also clear feedback when entering test mode and the local viewer has not answered yet
     if (state.current_step?.phase === "TEST" && !state.room?.has_answered_current_card) {
       setFeedback(null);
     }
   }
 
+  // Initial one-time room load from the backend
   async function loadRoomOnce() {
     try {
       setLoading(true);
@@ -200,6 +279,7 @@ export default function MultiplayerRoom() {
     }
   }
 
+  // Reconnects the user to the room after a reconnect event or socket reconnect
   async function reconnectRoom() {
     if (reconnectingRef.current) return;
     reconnectingRef.current = true;
@@ -233,11 +313,13 @@ export default function MultiplayerRoom() {
     }
   }
 
+  // Load the room whenever the join code changes
   useEffect(() => {
     loadRoomOnce();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code]);
 
+  // Create and manage the Socket.IO connection for live room updates
   useEffect(() => {
     const socket = io(API_URL, {
       transports: ["websocket"],
@@ -249,20 +331,24 @@ export default function MultiplayerRoom() {
 
     socketRef.current = socket;
 
+    // When connected, join the room and request a reconnect state refresh
     socket.on("connect", async () => {
       setConnectionState("connected");
       socket.emit("room:join", { joinCode: code });
       await reconnectRoom();
     });
 
+    // Update connection state when disconnected
     socket.on("disconnect", () => {
       setConnectionState("disconnected");
     });
 
+    // Update connection state during reconnect attempts
     socket.on("reconnect_attempt", () => {
       setConnectionState("reconnecting");
     });
 
+    // Handle general room state broadcasts
     socket.on("room:state", (state) => {
       if (!state?.room?.join_code || String(state.room.join_code).toUpperCase() !== code) {
         return;
@@ -270,6 +356,7 @@ export default function MultiplayerRoom() {
       applyState(state);
     });
 
+    // Handle personal room state events targeted specifically to this viewer
     socket.on("room:state:personal", (payload) => {
       if (!payload?.joinCode || String(payload.joinCode).toUpperCase() !== code) {
         return;
@@ -278,17 +365,20 @@ export default function MultiplayerRoom() {
       applyState(payload.state);
     });
 
+    // Handle socket connection errors
     socket.on("connect_error", (err) => {
       setConnectionState("disconnected");
       setMessage(err?.message || "Socket connection failed");
     });
 
+    // Cleanup when leaving the page
     return () => {
       socket.emit("room:leave", { joinCode: code });
       socket.disconnect();
     };
   }, [code, token]);
 
+  // Local countdown timer for room phases
   useEffect(() => {
     if (localSeconds === null || localSeconds <= 0) return;
 
@@ -303,6 +393,7 @@ export default function MultiplayerRoom() {
     return () => clearInterval(interval);
   }, [localSeconds]);
 
+  // Trigger a flip animation whenever the room phase changes
   useEffect(() => {
     if (!currentStep?.phase) return;
 
@@ -330,6 +421,7 @@ export default function MultiplayerRoom() {
     };
   }, [currentStep?.phase]);
 
+  // Host action: start the multiplayer room
   async function startRoom() {
     setMessage("");
     setActionLoading("start");
@@ -358,6 +450,7 @@ export default function MultiplayerRoom() {
     }
   }
 
+  // Host action: close the lobby before the game starts
   async function closeLobby() {
     setMessage("");
     setActionLoading("close");
@@ -382,6 +475,7 @@ export default function MultiplayerRoom() {
     }
   }
 
+  // Host action: end a live room early
   async function endRoom() {
     setMessage("");
     setActionLoading("end");
@@ -406,6 +500,7 @@ export default function MultiplayerRoom() {
     }
   }
 
+  // Host action: create a new room using the same settings after finishing
   async function playAgain() {
     setMessage("");
     setActionLoading("play_again");
@@ -435,12 +530,14 @@ export default function MultiplayerRoom() {
     }
   }
 
+  // Player action: submit an answer during test phase
   async function submitAnswer(e) {
     if (e) e.preventDefault();
     setMessage("");
     setFeedback(null);
     setInlineMessage("");
 
+    // Prevent duplicate submissions or answer input from non-playing viewers
     if (room?.has_answered_current_card || !room?.is_viewer_playing) return;
 
     const trimmed = answer.trim();
@@ -470,6 +567,7 @@ export default function MultiplayerRoom() {
     setFeedback(data);
   }
 
+  // Copies the room join link to the user's clipboard
   async function copyJoinLink() {
     try {
       await navigator.clipboard.writeText(joinUrl);
@@ -479,6 +577,7 @@ export default function MultiplayerRoom() {
     }
   }
 
+  // Derived booleans used throughout the UI for clearer conditional rendering
   const isHost = !!room?.is_viewer_host;
   const isPlaying = !!room?.is_viewer_playing;
   const isPreview = currentStep?.phase === "PREVIEW";
@@ -486,19 +585,25 @@ export default function MultiplayerRoom() {
   const isResult = currentStep?.phase === "RESULT";
   const leaderboardRows = finishedLeaderboard || [];
 
+  // Sort participants so the host appears first, then by score descending
   const sortedParticipants = [...participants].sort((a, b) => {
     if (Number(a.is_host) === 1 && Number(b.is_host) !== 1) return -1;
     if (Number(a.is_host) !== 1 && Number(b.is_host) === 1) return 1;
     return Number(b.score || 0) - Number(a.score || 0);
   });
 
+  // Count how many participants are active players
   const playingCount = sortedParticipants.filter(
     (p) => Number(p.is_playing) === 1
   ).length;
 
+  // Build a lookup set for quickly checking who has answered this round
   const answeredSet = new Set(answeredParticipants.map((p) => Number(p.participant_id)));
+
+  // Whether the local viewer has already answered this card
   const hasAnswered = !!room?.has_answered_current_card;
 
+  // Build a readable timer label depending on the room phase
   const timerLabel = useMemo(() => {
     if (!currentStep) return "";
     if (currentStep.phase === "RESULT") return "Result time remaining";
@@ -508,6 +613,7 @@ export default function MultiplayerRoom() {
     return "Time remaining";
   }, [currentStep]);
 
+  // Returns the timer colour based on how much time remains
   function getTimerColor() {
     if (localSeconds === null || !timerMaxSeconds) return "#22c55e";
 
@@ -518,6 +624,7 @@ export default function MultiplayerRoom() {
     return "#ef4444";
   }
 
+  // Returns the progress percentage for the timer bar
   function getTimerProgressPercent() {
     if (localSeconds === null || !timerMaxSeconds || timerMaxSeconds <= 0) {
       return 100;
@@ -525,6 +632,7 @@ export default function MultiplayerRoom() {
     return Math.max(0, Math.min(100, (localSeconds / timerMaxSeconds) * 100));
   }
 
+  // Renders progress UI for the room using whatever progress format the backend returned
   function renderProgress() {
     if (!currentStep) return null;
 
@@ -651,11 +759,13 @@ export default function MultiplayerRoom() {
     return null;
   }
 
+  // Dynamic styling for the flashcard perspective wrapper
   const flashcardPerspectiveStyle = {
     ...styles.flashcardPerspective,
     perspective: "1800px",
   };
 
+  // Dynamic styling for the animated flashcard shell
   const flashcardShellStyle = {
     ...styles.flashcardShell,
     borderRadius: setTheme.border_radius,
@@ -669,12 +779,14 @@ export default function MultiplayerRoom() {
     filter: isFlipping ? "brightness(1.06)" : "brightness(1)",
   };
 
+  // Dynamic styling for the flashcard top half
   const flashcardTopStyle = {
     ...styles.flashcardTop,
     background: setTheme.top_color,
     color: setTheme.text_color,
   };
 
+  // Dynamic styling for the flashcard bottom half
   const flashcardBottomStyle = {
     ...styles.flashcardBottom,
     background: setTheme.bottom_color,
@@ -682,6 +794,7 @@ export default function MultiplayerRoom() {
     borderTop: `1px solid ${setTheme.accent_color}`,
   };
 
+  // Standard active button styling used throughout the room UI
   const themedButtonStyle = {
     ...styles.button,
     backgroundColor: "#3b82f6",
@@ -692,6 +805,7 @@ export default function MultiplayerRoom() {
     WebkitTextFillColor: "#ffffff",
   };
 
+  // Disabled button styling used throughout the room UI
   const themedDisabledButtonStyle = {
     ...styles.button,
     backgroundColor: "#3b82f6",
@@ -703,6 +817,7 @@ export default function MultiplayerRoom() {
     WebkitTextFillColor: "#ffffff",
   };
 
+  // Active green start button styling for host actions
   const themedStartButtonStyle = {
     ...styles.startButton,
     backgroundColor: "#22c55e",
@@ -714,6 +829,7 @@ export default function MultiplayerRoom() {
     WebkitTextFillColor: "#ffffff",
   };
 
+  // Disabled green start button styling
   const themedDisabledStartButtonStyle = {
     ...styles.startButton,
     backgroundColor: "#22c55e",
@@ -726,28 +842,34 @@ export default function MultiplayerRoom() {
     WebkitTextFillColor: "#ffffff",
   };
 
+  // Dynamic label styling that matches the current set theme
   const themedLabelStyle = {
     ...styles.label,
     color: setTheme.text_color,
   };
 
+  // Dynamic answer label styling that uses the set accent colour
   const themedAnswerLabelStyle = {
     ...styles.answerLabel,
     color: setTheme.accent_color,
     opacity: 1,
   };
 
+  // Dynamic question label styling that uses the set accent colour
   const themedQuestionLabelStyle = {
     ...styles.questionLabel,
     color: setTheme.accent_color,
     opacity: 1,
   };
 
+  // Build the shareable join URL for this room
   const joinUrl = `${window.location.origin}/multiplayer/join/${code}`;
 
+  // Render the Multiplayer Room page UI
   return (
     <div style={pageStyle}>
       <div style={styles.container}>
+        {/* Header row with page title and navigation back to sets */}
         <div style={styles.headerRow}>
           <h1 style={styles.title}>Multiplayer Practice</h1>
 
@@ -756,6 +878,7 @@ export default function MultiplayerRoom() {
           </Link>
         </div>
 
+        {/* Show connection status whenever the room is reconnecting or disconnected */}
         {connectionState !== "connected" && (
           <div style={styles.timeoutMessage}>
             {connectionState === "reconnecting"
@@ -764,8 +887,10 @@ export default function MultiplayerRoom() {
           </div>
         )}
 
+        {/* General room message area */}
         {message && <div style={styles.error}>{message}</div>}
 
+        {/* Closed lobby state */}
         {room?.status === "CLOSED" && (
           <div style={styles.resultPanel}>
             <h2 style={styles.sectionTitle}>Lobby Closed</h2>
@@ -773,6 +898,7 @@ export default function MultiplayerRoom() {
           </div>
         )}
 
+        {/* Lobby screen before the game starts */}
         {room?.status === "LOBBY" && (
           <div style={styles.practiceSessionArea}>
             <div style={styles.infoPanel}>
@@ -816,6 +942,7 @@ export default function MultiplayerRoom() {
               </div>
             </div>
 
+            {/* Main lobby card with join link and QR code */}
             <div style={flashcardPerspectiveStyle}>
               <div style={flashcardShellStyle}>
                 <div style={flashcardTopStyle}>
@@ -856,6 +983,7 @@ export default function MultiplayerRoom() {
               </div>
             </div>
 
+            {/* Lobby participant list and host controls */}
             <div style={styles.card}>
               <h3 style={styles.sectionTitle}>Room Members</h3>
               <div style={styles.hardestList}>
@@ -909,6 +1037,7 @@ export default function MultiplayerRoom() {
           </div>
         )}
 
+        {/* Live gameplay screen */}
         {room?.status === "LIVE" && currentStep && (
           <div style={styles.practiceSessionArea}>
             <div style={styles.infoPanel}>
@@ -971,6 +1100,7 @@ export default function MultiplayerRoom() {
               )}
             </div>
 
+            {/* Main live gameplay flashcard */}
             <div style={flashcardPerspectiveStyle}>
               <div style={flashcardShellStyle}>
                 <div style={flashcardTopStyle}>
@@ -984,6 +1114,7 @@ export default function MultiplayerRoom() {
 
                 <div style={flashcardBottomStyle}>
                   <div style={styles.flashcardContentBottom}>
+                    {/* Preview phase content */}
                     {isPreview && currentStep.answer && (
                       <div style={styles.bottomSectionBlock}>
                         <div style={themedAnswerLabelStyle}>Full Answer</div>
@@ -1002,6 +1133,7 @@ export default function MultiplayerRoom() {
                       </div>
                     )}
 
+                    {/* Test phase blanked text content */}
                     {isTest && currentStep.blanked_text && (
                       <div style={styles.bottomSectionBlock}>
                         <div style={themedAnswerLabelStyle}>Fill in the blanks</div>
@@ -1014,24 +1146,10 @@ export default function MultiplayerRoom() {
                         >
                           {currentStep.blanked_text}
                         </div>
-
-                        {currentStep.first_letter_clues && (
-                          <>
-                            <div style={themedAnswerLabelStyle}>Clues</div>
-                            <div
-                              style={styles.noCopyText}
-                              onCopy={(e) => e.preventDefault()}
-                              onCut={(e) => e.preventDefault()}
-                              onContextMenu={(e) => e.preventDefault()}
-                              onDragStart={(e) => e.preventDefault()}
-                            >
-                              {currentStep.first_letter_clues}
-                            </div>
-                          </>
-                        )}
                       </div>
                     )}
 
+                    {/* Test phase answer input for active players */}
                     {isTest && isPlaying && (
                       <form onSubmit={submitAnswer}>
                         <label style={themedLabelStyle}>Your Answer</label>
@@ -1080,6 +1198,7 @@ export default function MultiplayerRoom() {
                       </form>
                     )}
 
+                    {/* Host/controller view during test phase */}
                     {isTest && !isPlaying && (
                       <div style={styles.bottomSectionBlock}>
                         <div style={themedAnswerLabelStyle}>Host View</div>
@@ -1092,6 +1211,7 @@ export default function MultiplayerRoom() {
                       </div>
                     )}
 
+                    {/* Result phase content */}
                     {isResult && (
                       <div style={styles.bottomSectionBlock}>
                         <div style={themedAnswerLabelStyle}>Correct Answer</div>
@@ -1135,6 +1255,7 @@ export default function MultiplayerRoom() {
               </div>
             </div>
 
+            {/* Live participant scoreboard */}
             <div style={styles.card}>
               <h3 style={styles.sectionTitle}>Players</h3>
               <div style={styles.hardestList}>
@@ -1183,6 +1304,7 @@ export default function MultiplayerRoom() {
           </div>
         )}
 
+        {/* Finished room screen with leaderboard */}
         {room?.status === "FINISHED" && (
           <div
             style={{
@@ -1269,17 +1391,24 @@ export default function MultiplayerRoom() {
   );
 }
 
+// Centralised styles object for the Multiplayer Room page.
+// Keeps layout and appearance styling separate from the component logic.
 const styles = {
+  // Full page wrapper styling
   page: {
     minHeight: "100vh",
     background: "#0b1220",
     color: "white",
     padding: 24,
   },
+
+  // Main content container
   container: {
     maxWidth: 980,
     margin: "0 auto",
   },
+
+  // Header row layout
   headerRow: {
     display: "flex",
     justifyContent: "space-between",
@@ -1288,18 +1417,26 @@ const styles = {
     flexWrap: "wrap",
     marginBottom: 24,
   },
+
+  // Main page title styling
   title: {
     margin: 0,
   },
+
+  // Back link styling
   backLink: {
     color: "#93c5fd",
     textDecoration: "none",
     fontWeight: 600,
   },
+
+  // Shared section title styling
   sectionTitle: {
     marginTop: 0,
     marginBottom: 10,
   },
+
+  // Standard card styling
   card: {
     background: "#121a2a",
     padding: 28,
@@ -1307,23 +1444,31 @@ const styles = {
     marginBottom: 20,
     boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
   },
+
+  // Wrapper for the live room content area
   practiceSessionArea: {
     display: "flex",
     flexDirection: "column",
     gap: 18,
     marginBottom: 20,
   },
+
+  // Info panel styling
   infoPanel: {
     background: "#121a2a",
     padding: 20,
     borderRadius: 14,
     boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
   },
+
+  // Perspective wrapper for card animation
   flashcardPerspective: {
     width: "100%",
     display: "flex",
     justifyContent: "center",
   },
+
+  // Animated flashcard shell
   flashcardShell: {
     overflow: "hidden",
     maxWidth: 760,
@@ -1338,6 +1483,8 @@ const styles = {
     willChange: "transform",
     backfaceVisibility: "hidden",
   },
+
+  // Top half of the flashcard
   flashcardTop: {
     padding: 28,
     minHeight: 180,
@@ -1345,6 +1492,8 @@ const styles = {
     flexDirection: "column",
     justifyContent: "center",
   },
+
+  // Bottom half of the flashcard
   flashcardBottom: {
     padding: 28,
     minHeight: 240,
@@ -1352,6 +1501,8 @@ const styles = {
     flexDirection: "column",
     justifyContent: "center",
   },
+
+  // Content alignment for the top section
   flashcardContentTop: {
     display: "flex",
     alignItems: "center",
@@ -1359,21 +1510,29 @@ const styles = {
     flex: 1,
     textAlign: "center",
   },
+
+  // Content alignment for the bottom section
   flashcardContentBottom: {
     display: "flex",
     flexDirection: "column",
     justifyContent: "center",
     flex: 1,
   },
+
+  // Shared result panel styling
   resultPanel: {
     background: "#121a2a",
     padding: 28,
     marginBottom: 20,
     boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
   },
+
+  // Standard spacing block inside flashcards
   bottomSectionBlock: {
     marginBottom: 18,
   },
+
+  // Error/status message styling
   error: {
     background: "rgba(239,68,68,0.15)",
     color: "#fecaca",
@@ -1382,6 +1541,8 @@ const styles = {
     marginBottom: 20,
     border: "1px solid rgba(239,68,68,0.25)",
   },
+
+  // Reconnect/warning message styling
   timeoutMessage: {
     background: "rgba(251,191,36,0.15)",
     color: "#fde68a",
@@ -1392,6 +1553,8 @@ const styles = {
     textAlign: "center",
     fontWeight: 600,
   },
+
+  // Inline validation warning styling
   inlineWarning: {
     background: "rgba(245,158,11,0.15)",
     color: "#fde68a",
@@ -1400,6 +1563,8 @@ const styles = {
     marginBottom: 10,
     border: "1px solid rgba(245,158,11,0.25)",
   },
+
+  // Inline submitted status styling
   inlineSubmitted: {
     background: "rgba(59,130,246,0.15)",
     color: "#bfdbfe",
@@ -1408,12 +1573,16 @@ const styles = {
     marginTop: 10,
     border: "1px solid rgba(59,130,246,0.25)",
   },
+
+  // Badge row layout
   badgeRow: {
     display: "flex",
     gap: 10,
     flexWrap: "wrap",
     marginBottom: 16,
   },
+
+  // Badge styling
   badge: {
     padding: "6px 10px",
     borderRadius: 999,
@@ -1421,14 +1590,20 @@ const styles = {
     fontSize: 13,
     fontWeight: 700,
   },
+
+  // Progress wrapper styling
   progressWrap: {
     marginBottom: 18,
   },
+
+  // Progress text styling
   progressText: {
     fontSize: 14,
     marginBottom: 8,
     opacity: 0.95,
   },
+
+  // Outer progress bar styling
   progressBarOuter: {
     height: 10,
     width: "100%",
@@ -1437,11 +1612,15 @@ const styles = {
     overflow: "hidden",
     border: "1px solid #23304c",
   },
+
+  // Inner progress bar styling
   progressBarInner: {
     height: "100%",
     background: "#3b82f6",
     borderRadius: 999,
   },
+
+  // Timer card styling
   timerCard: {
     background: "#09101d",
     border: "1px solid #23304c",
@@ -1450,16 +1629,22 @@ const styles = {
     marginBottom: 0,
     textAlign: "center",
   },
+
+  // Timer label styling
   timerLabel: {
     fontSize: 14,
     opacity: 0.9,
     marginBottom: 6,
   },
+
+  // Timer value styling
   timerValue: {
     fontSize: 28,
     fontWeight: 800,
     transition: "color 0.4s ease",
   },
+
+  // Timer progress outer bar
   timerProgressOuter: {
     marginTop: 14,
     height: 12,
@@ -1469,11 +1654,15 @@ const styles = {
     overflow: "hidden",
     border: "1px solid #23304c",
   },
+
+  // Timer progress inner bar
   timerProgressInner: {
     height: "100%",
     borderRadius: 999,
     transition: "width 1s linear, background 0.4s ease",
   },
+
+  // Question label styling
   questionLabel: {
     fontSize: 13,
     textTransform: "uppercase",
@@ -1482,11 +1671,15 @@ const styles = {
     marginBottom: 12,
     textAlign: "center",
   },
+
+  // Main question styling
   question: {
     margin: 0,
     lineHeight: 1.5,
     fontSize: 28,
   },
+
+  // Answer label styling
   answerLabel: {
     fontSize: 13,
     textTransform: "uppercase",
@@ -1495,6 +1688,8 @@ const styles = {
     marginBottom: 8,
     marginTop: 8,
   },
+
+  // Styling for full answers where copying is blocked
   noCopyAnswer: {
     lineHeight: 1.7,
     fontSize: 18,
@@ -1503,6 +1698,8 @@ const styles = {
     MozUserSelect: "none",
     msUserSelect: "none",
   },
+
+  // Styling for blanked/clue text where copying is blocked
   noCopyText: {
     lineHeight: 1.9,
     fontSize: 20,
@@ -1513,6 +1710,8 @@ const styles = {
     MozUserSelect: "none",
     msUserSelect: "none",
   },
+
+  // Styling for the join URL box where copying is allowed
   linkBox: {
     lineHeight: 1.7,
     fontSize: 16,
@@ -1528,21 +1727,29 @@ const styles = {
     msUserSelect: "text",
     cursor: "text",
   },
+
+  // Small supporting hint text styling
   autoHint: {
     marginTop: 12,
     fontSize: 14,
     opacity: 0.85,
   },
+
+  // Summary grid layout
   summaryGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
     gap: 12,
   },
+
+  // Summary card styling
   summaryCard: {
     background: "#09101d",
     border: "1px solid #23304c",
     padding: 16,
   },
+
+  // Summary label styling
   summaryLabel: {
     fontSize: 13,
     textTransform: "uppercase",
@@ -1550,38 +1757,54 @@ const styles = {
     opacity: 0.8,
     marginBottom: 8,
   },
+
+  // Summary value styling
   summaryValue: {
     fontSize: 24,
     fontWeight: 800,
   },
+
+  // Shared list layout used for participants/leaderboard
   hardestList: {
     display: "grid",
     gap: 12,
   },
+
+  // Shared participant/leaderboard card styling
   hardestCard: {
     background: "#09101d",
     border: "1px solid #23304c",
     padding: 16,
   },
+
+  // Primary text styling inside participant/leaderboard cards
   hardestQuestion: {
     fontWeight: 700,
     marginBottom: 8,
   },
+
+  // Secondary text styling inside participant/leaderboard cards
   hardestRating: {
     opacity: 0.9,
   },
+
+  // Shared centered action row
   actionRow: {
     display: "flex",
     justifyContent: "center",
     gap: 12,
     flexWrap: "wrap",
   },
+
+  // Shared label styling for inputs
   label: {
     display: "block",
     marginBottom: 6,
     marginTop: 10,
     fontWeight: 600,
   },
+
+  // Shared textarea styling
   textarea: {
     width: "100%",
     minHeight: 140,
@@ -1594,6 +1817,8 @@ const styles = {
     resize: "vertical",
     boxSizing: "border-box",
   },
+
+  // Shared main button styling
   button: {
     padding: "12px 16px",
     borderRadius: 8,
@@ -1609,6 +1834,8 @@ const styles = {
     opacity: 1,
     outline: "none",
   },
+
+  // Shared green start button styling
   startButton: {
     display: "block",
     width: "100%",
@@ -1629,6 +1856,8 @@ const styles = {
     opacity: 1,
     outline: "none",
   },
+
+  // Secondary button styling
   secondaryButton: {
     padding: "12px 16px",
     borderRadius: 8,
@@ -1639,6 +1868,8 @@ const styles = {
     cursor: "pointer",
     marginTop: 8,
   },
+
+  // QR code wrapper styling
   qrWrap: {
     background: "white",
     display: "inline-block",
@@ -1646,6 +1877,8 @@ const styles = {
     borderRadius: 12,
     marginTop: 8,
   },
+
+  // Result text styling used in result phase
   resultStatus: {
     fontSize: 24,
     fontWeight: 800,
